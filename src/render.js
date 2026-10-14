@@ -10,10 +10,11 @@ const DEFAULTS = {
 	background: '#ffffff', // null/'' = transparent
 };
 
-// Shapes in pixels: { width, height, rects: [[x, y, w, h]], texts: [{ x, y, text, anchor, size }] }
+// Shapes in pixels: { width, height, rects: [[x, y, w, h]], shapes: [{ x, y, w, h, r, color, hole }],
+// texts: [{ x, y, text, anchor, size }], image: { href, x, y, w, h } }
 export function layout(symbol, options = {}) {
 	const o = { ...DEFAULTS, ...options };
-	const rects = [], texts = [];
+	const rects = [], texts = [], shapes = [];
 	const runs = (bits, x0, y, s, h) => {
 		for (let i = 0; i < bits.length; i++) {
 			if (bits[i] !== '1' && bits[i] !== 1) continue;
@@ -25,9 +26,35 @@ export function layout(symbol, options = {}) {
 	};
 
 	if (symbol.type === 'matrix') {
-		const s = o.scale ?? 4, m = o.margin ?? symbol.quiet * s, w = symbol.width;
-		for (let y = 0; y < symbol.height; y++) runs(symbol.modules.subarray(y * w, (y + 1) * w), m, m + y * s, s, s);
-		return { width: w * s + 2 * m, height: symbol.height * s + 2 * m, rects, texts, o };
+		const s = o.scale ?? 4, m = o.margin ?? symbol.quiet * s, w = symbol.width, h = symbol.height;
+		const shape = o.moduleShape ?? 'square';
+		const rounded = o.finderShape === 'rounded';
+		const finders = rounded || o.finderColor ? symbol.finders ?? [] : [];
+		const inFinder = (x, y) => finders.some(([fx, fy]) => x >= fx && x < fx + 7 && y >= fy && y < fy + 7);
+		// Logo: clear a centered square of modules (QR picks ECC level H by default when a logo is set)
+		let hole = null, image;
+		if (o.logo) {
+			let n = Math.round(w * Math.min(o.logoSize ?? 0.2, 0.3));
+			n += (w - n) % 2;
+			hole = [(w - n) / 2, (h - n) / 2, n];
+			const pad = s / 2;
+			image = { href: typeof o.logo === 'string' ? o.logo : o.logo.src, img: o.logo, x: m + hole[0] * s + pad, y: m + hole[1] * s + pad, w: n * s - 2 * pad, h: n * s - 2 * pad };
+		}
+		const inHole = (x, y) => hole && x >= hole[0] && x < hole[0] + hole[2] && y >= hole[1] && y < hole[1] + hole[2];
+		for (let y = 0; y < h; y++) {
+			const row = symbol.modules.slice(y * w, (y + 1) * w);
+			for (let x = 0; x < w; x++) if (inFinder(x, y) || inHole(x, y)) row[x] = 0;
+			if (shape === 'square') runs(row, m, m + y * s, s, s);
+			else for (let x = 0; x < w; x++) if (row[x]) shapes.push(shape === 'dots'
+				? { x: m + (x + 0.05) * s, y: m + (y + 0.05) * s, w: 0.9 * s, h: 0.9 * s, r: 0.45 * s }
+				: { x: m + x * s, y: m + y * s, w: s, h: s, r: 0.3 * s });
+		}
+		for (const [fx, fy] of finders) {
+			const X = m + fx * s, Y = m + fy * s, color = o.finderColor ?? o.color;
+			shapes.push({ x: X, y: Y, w: 7 * s, h: 7 * s, r: rounded ? 2 * s : 0, color, hole: { x: X + s, y: Y + s, w: 5 * s, h: 5 * s, r: rounded ? 1.5 * s : 0 } });
+			shapes.push({ x: X + 2 * s, y: Y + 2 * s, w: 3 * s, h: 3 * s, r: rounded ? s : 0, color });
+		}
+		return { width: w * s + 2 * m, height: h * s + 2 * m, rects, shapes, texts, image, o };
 	}
 
 	const s = o.scale ?? 2, m = o.margin ?? 10, h = o.height;
@@ -52,17 +79,28 @@ export function layout(symbol, options = {}) {
 		x += w;
 	}
 	if (override) texts.push({ x: x / 2 + m / 2, y: m + h + o.textMargin + fs, text: o.text, anchor: 'middle', size: fs });
-	return { width: x + m, height: m + Math.max(guardH, h + textH) + m, rects, texts, o };
+	return { width: x + m, height: m + Math.max(guardH, h + textH) + m, rects, shapes, texts, o };
 }
 
 const esc = (v) => String(v).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+const n2 = (n) => +n.toFixed(2);
+const rrPath = ({ x, y, w, h, r }) => {
+	[x, y, w, h, r] = [x, y, w, h, Math.min(r, w / 2, h / 2)].map(n2);
+	if (!r) return `M${x} ${y}h${w}v${h}h${-w}z`;
+	const a = (dx, dy) => `a${r} ${r} 0 0 1 ${dx} ${dy}`;
+	return `M${n2(x + r)} ${y}h${n2(w - 2 * r)}${a(r, r)}v${n2(h - 2 * r)}${a(-r, r)}h${n2(2 * r - w)}${a(-r, -r)}v${n2(2 * r - h)}${a(r, -r)}z`;
+};
 
 export function toSVG(symbol, options) {
 	const L = layout(symbol, options), o = L.o;
 	const d = L.rects.map(([x, y, w, h]) => `M${x} ${y}h${w}v${h}h${-w}z`).join('');
-	return `<svg xmlns="http://www.w3.org/2000/svg" width="${L.width}" height="${L.height}" viewBox="0 0 ${L.width} ${L.height}" shape-rendering="crispEdges">` +
+	const byColor = {};
+	for (const sh of L.shapes) (byColor[sh.color ?? o.color] ??= []).push(rrPath(sh) + (sh.hole ? rrPath(sh.hole) : ''));
+	return `<svg xmlns="http://www.w3.org/2000/svg" width="${L.width}" height="${L.height}" viewBox="0 0 ${L.width} ${L.height}"${L.shapes.length ? '' : ' shape-rendering="crispEdges"'}>` +
 		(o.background ? `<rect width="100%" height="100%" fill="${esc(o.background)}"/>` : '') +
-		`<path fill="${esc(o.color)}" d="${d}"/>` +
+		(d ? `<path fill="${esc(o.color)}" d="${d}"/>` : '') +
+		Object.entries(byColor).map(([c, ds]) => `<path fill="${esc(c)}" fill-rule="evenodd" d="${ds.join('')}"/>`).join('') +
+		(L.image ? `<image href="${esc(L.image.href)}" x="${L.image.x}" y="${L.image.y}" width="${L.image.w}" height="${L.image.h}" preserveAspectRatio="xMidYMid meet"/>` : '') +
 		L.texts.map((t) => `<text x="${t.x}" y="${t.y}" font-family="${esc(o.font)}" font-size="${t.size}" text-anchor="${t.anchor}" fill="${esc(o.color)}">${esc(t.text)}</text>`).join('') +
 		'</svg>';
 }
@@ -76,6 +114,18 @@ export function toCanvas(canvas, symbol, options) {
 	if (o.background) { ctx.fillStyle = o.background; ctx.fillRect(0, 0, L.width, L.height); }
 	ctx.fillStyle = o.color;
 	for (const [x, y, w, h] of L.rects) ctx.fillRect(x, y, w, h);
+	const rr = ({ x, y, w, h, r }) => {
+		r = Math.min(r, w / 2, h / 2);
+		ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+		ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+	};
+	for (const sh of L.shapes) {
+		ctx.fillStyle = sh.color ?? o.color;
+		ctx.beginPath(); rr(sh); if (sh.hole) rr(sh.hole); ctx.fill('evenodd');
+	}
+	// Logo must be an already-loaded image (HTMLImageElement, ImageBitmap, ...) since drawing is synchronous
+	if (L.image && typeof L.image.img === 'object') ctx.drawImage(L.image.img, L.image.x, L.image.y, L.image.w, L.image.h);
+	ctx.fillStyle = o.color;
 	ctx.textAlign = 'center';
 	for (const t of L.texts) { ctx.font = `${t.size}px ${o.font}`; ctx.fillText(t.text, t.x, t.y); }
 	return canvas;
@@ -89,7 +139,7 @@ const GLYPH_BITS = ('3a33ae62e 11842108e 3a211111f 7c441062e 8ca97c42 7e1e0862e 
 	'4631ad6aa 462a22a31 463151084 7c222221f f8000 18c 2222200 84f9080 11f4717c4 632222263 18c03180 9575480 88842082 ' +
 	'208210888 3a2111004 0').split(' ').map((h) => parseInt(h, 16));
 
-// Rasterize to a 1-byte-per-pixel bitmap (1 = foreground)
+// Rasterize to a 1-byte-per-pixel bitmap (0 = background, 1 = color, 2 = finderColor). Logos are not rasterized.
 export function toBitmap(symbol, options) {
 	const L = layout(symbol, options);
 	const W = Math.ceil(L.width), H = Math.ceil(L.height), px = new Uint8Array(W * H);
@@ -98,6 +148,16 @@ export function toBitmap(symbol, options) {
 			for (let xx = Math.round(x); xx < Math.round(x + w); xx++) if (xx >= 0 && yy >= 0 && xx < W && yy < H) px[yy * W + xx] = 1;
 	};
 	for (const r of L.rects) fill(...r);
+	const inside = ({ x, y, w, h, r }, px_, py) => {
+		const dx = Math.max(x + r - px_, 0, px_ - (x + w - r)), dy = Math.max(y + r - py, 0, py - (y + h - r));
+		return px_ >= x && px_ <= x + w && py >= y && py <= y + h && dx * dx + dy * dy <= r * r + 1e-9;
+	};
+	for (const sh of L.shapes) {
+		const v = sh.color && sh.color !== L.o.color ? 2 : 1;
+		for (let yy = Math.max(0, Math.floor(sh.y)); yy < Math.min(H, Math.ceil(sh.y + sh.h)); yy++)
+			for (let xx = Math.max(0, Math.floor(sh.x)); xx < Math.min(W, Math.ceil(sh.x + sh.w)); xx++)
+				if (inside(sh, xx + 0.5, yy + 0.5) && !(sh.hole && inside(sh.hole, xx + 0.5, yy + 0.5))) px[yy * W + xx] = v;
+	}
 	for (const t of L.texts) {
 		const k = Math.max(1, Math.round(t.size / 9)), text = String(t.text).toUpperCase();
 		const tw = text.length * 6 * k - k;
@@ -113,7 +173,43 @@ export function toBitmap(symbol, options) {
 	return { width: W, height: H, data: px, o: L.o };
 }
 
-// ---------- PNG (1-bit palette, stored deflate: tiny code, sync, works everywhere) ----------
+// ---------- PNG (1- or 2-bit palette, small sync deflate, works everywhere) ----------
+
+// Fixed-Huffman deflate with LZ77 matches at distance 1 (runs) and one row up (repeated rows).
+// ponytail: no hash-chain search or dynamic Huffman; barcode rasters are almost all runs and repeated rows.
+const LEN_BASE = [3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258];
+const LEN_EXTRA = [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0];
+const DIST_BASE = [1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577];
+const DIST_EXTRA = [0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13];
+export function deflate(raw, rowLen) {
+	const out = [];
+	let buf = 0, cnt = 0;
+	const put = (v, n) => { buf |= v << cnt; cnt += n; while (cnt >= 8) { out.push(buf & 255); buf >>>= 8; cnt -= 8; } };
+	const huff = (c, n) => { let r = 0; for (let i = 0; i < n; i++) r |= ((c >> i) & 1) << (n - 1 - i); put(r, n); };
+	const lit = (x) => (x < 144 ? huff(0x30 + x, 8) : x < 256 ? huff(0x190 + x - 144, 9) : x < 280 ? huff(x - 256, 7) : huff(0xc0 + x - 280, 8));
+	put(1, 1); put(1, 2); // final block, fixed Huffman
+	for (let i = 0; i < raw.length;) {
+		let len = 0, dist = 0;
+		for (const d of [rowLen, 1]) {
+			if (d > i || d > 32768) continue;
+			let n = 0;
+			while (n < 258 && i + n < raw.length && raw[i + n] === raw[i + n - d]) n++;
+			if (n > len) { len = n; dist = d; }
+		}
+		if (len >= 3) {
+			let c = 0;
+			while (c < 28 && LEN_BASE[c + 1] <= len) c++;
+			lit(257 + c); put(len - LEN_BASE[c], LEN_EXTRA[c]);
+			let dc = 0;
+			while (dc < 29 && DIST_BASE[dc + 1] <= dist) dc++;
+			huff(dc, 5); put(dist - DIST_BASE[dc], DIST_EXTRA[dc]);
+			i += len;
+		} else lit(raw[i++]);
+	}
+	lit(256);
+	if (cnt) out.push(buf & 255);
+	return out;
+}
 const CRC = Array.from({ length: 256 }, (_, n) => {
 	for (let k = 0; k < 8; k++) n = n & 1 ? 0xedb88320 ^ (n >>> 1) : n >>> 1;
 	return n >>> 0;
@@ -134,18 +230,13 @@ function parseColor(c) {
 
 export function toPNG(symbol, options) {
 	const { width: W, height: H, data, o } = toBitmap(symbol, options);
-	const rowLen = Math.ceil(W / 8) + 1;
+	const bd = data.includes(2) ? 2 : 1, per = 8 / bd;
+	const rowLen = Math.ceil(W / per) + 1;
 	const raw = new Uint8Array(rowLen * H);
 	for (let y = 0; y < H; y++)
-		for (let x = 0; x < W; x++) if (data[y * W + x]) raw[y * rowLen + 1 + (x >> 3)] |= 0x80 >> (x & 7);
+		for (let x = 0; x < W; x++) if (data[y * W + x]) raw[y * rowLen + 1 + Math.floor(x / per)] |= data[y * W + x] << (8 - bd - (x % per) * bd);
 
-	// zlib stream with stored (uncompressed) blocks
-	const z = [0x78, 0x01];
-	for (let i = 0; i < raw.length || i === 0; i += 65535) {
-		const len = Math.min(65535, raw.length - i), last = i + 65535 >= raw.length ? 1 : 0;
-		z.push(last, len & 255, len >> 8, ~len & 255, (~len >> 8) & 255);
-		for (let k = i; k < i + len; k++) z.push(raw[k]);
-	}
+	const z = [0x78, 0x01].concat(deflate(raw, rowLen));
 	let a = 1, b = 0;
 	for (const x of raw) { a = (a + x) % 65521; b = (b + a) % 65521; }
 	z.push(...u32(((b << 16) | a) >>> 0));
@@ -158,8 +249,8 @@ export function toPNG(symbol, options) {
 		for (const x of typed) out.push(x);
 		out.push(...u32(crc32(typed)));
 	};
-	chunk('IHDR', [...u32(W), ...u32(H), 1, 3, 0, 0, 0]);
-	chunk('PLTE', [...(o.background ? parseColor(o.background) : [255, 255, 255]), ...parseColor(o.color)]);
+	chunk('IHDR', [...u32(W), ...u32(H), bd, 3, 0, 0, 0]);
+	chunk('PLTE', [...(o.background ? parseColor(o.background) : [255, 255, 255]), ...parseColor(o.color), ...(bd === 2 ? parseColor(o.finderColor) : [])]);
 	if (!o.background) chunk('tRNS', [0]);
 	chunk('IDAT', z);
 	chunk('IEND', []);

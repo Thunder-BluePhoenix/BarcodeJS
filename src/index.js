@@ -1,6 +1,9 @@
 import * as L from './linear.js';
 import { code128, gs1128 } from './code128.js';
 import { qr } from './qr.js';
+import { microqr } from './microqr.js';
+import { pdf417 } from './pdf417.js';
+import { aztec } from './aztec.js';
 import { datamatrix } from './datamatrix.js';
 import * as R from './render.js';
 
@@ -17,11 +20,25 @@ export const formats = {
 	MSI: L.msi, MSI10: fixed(L.msi, { checksum: 'mod10' }), MSI11: fixed(L.msi, { checksum: 'mod11' }),
 	MSI1010: fixed(L.msi, { checksum: 'mod1010' }), MSI1110: fixed(L.msi, { checksum: 'mod1110' }),
 	CODABAR: L.codabar, PHARMACODE: L.pharmacode,
-	QR: qr, QRCODE: qr, DATAMATRIX: datamatrix,
+	QR: qr, QRCODE: qr, MICROQR: microqr, DATAMATRIX: datamatrix, PDF417: pdf417, AZTEC: aztec,
 };
 
+// format: 'auto' picks a format from the value's shape
+export function detectFormat(value) {
+	const v = String(value);
+	const ok = (format) => isValid(v, { format });
+	if (/^\(\d{2,4}\)/.test(v) && ok('GS1-128')) return 'GS1-128';
+	if (/^\d{13}$/.test(v) && ok('EAN13')) return 'EAN13';
+	if (/^\d{12}$/.test(v) && ok('UPC')) return 'UPC';
+	if (/^\d{8}$/.test(v) && ok('EAN8')) return 'EAN8';
+	if (/^\d{14}$/.test(v) && ok('ITF14')) return 'ITF14';
+	if (v.length > 40 || /^[a-z][a-z\d+.-]*:/i.test(v) || /[^\x00-\xff]/.test(v)) return 'QR';
+	return 'CODE128';
+}
+
 export function encode(value, options = {}) {
-	const name = String(options.format ?? 'CODE128').toUpperCase().replace(/[-_\s]/g, '');
+	const format = String(options.format ?? 'CODE128').toLowerCase() === 'auto' ? detectFormat(value) : options.format ?? 'CODE128';
+	const name = String(format).toUpperCase().replace(/[-_\s]/g, '');
 	const fn = formats[name];
 	if (!fn) throw new Error(`Unknown barcode format: ${options.format}`);
 	return fn(value, options);
@@ -60,6 +77,17 @@ export function render(target, value, options = {}) {
 			for (const a of ['width', 'height', 'viewBox', 'shape-rendering']) el.setAttribute(a, svg.getAttribute(a));
 			el.innerHTML = svg.innerHTML;
 		} else el.innerHTML = toSVG(value, options);
+	}
+}
+
+// Render every element with a data-barcode attribute; other data-* attributes become options
+// (<svg data-barcode="12345" data-format="EAN8" data-scale="3">).
+const attr = (v) => (v === 'true' ? true : v === 'false' ? false : v !== '' && !isNaN(v) ? Number(v) : v);
+export function init(root = document) {
+	for (const el of root.querySelectorAll('[data-barcode]')) {
+		const options = {};
+		for (const [k, v] of Object.entries(el.dataset)) if (k !== 'barcode') options[k] = attr(v);
+		render(el, el.dataset.barcode, options);
 	}
 }
 

@@ -29,3 +29,12 @@ coverage/
 .env
 .env.*
 *.tgz
+
+# zxing-cpp verification images
+.zxing-cpp-out/
+
+# Python (zxing-cpp check)
+__pycache__/
+*.pyc
+.venv/
+venv/

@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { inflateSync } from 'node:zlib';
-import { encode, isValid, toSVG, toPNG, toDataURL, toBitmap, formats } from '../src/index.js';
+import { spawnSync } from 'node:child_process';
+import { encode, isValid, toSVG, toPNG, toDataURL, toBitmap, formats, detectFormat, init } from '../src/index.js';
 
 test('SVG output is escaped and sized', () => {
 	const svg = toSVG('<a&"b>', { format: 'CODE128', font: 'x"y' });
@@ -43,4 +44,54 @@ test('new 1D formats', () => {
 	// C check digit of 123-45 is 5 ('wnwnn'), then the stop pattern ('nnwwn')
 	assert.ok(encode('123-45', { format: 'CODE11' }).segments[0].bits.endsWith('111011101' + '0' + '101110001'));
 	assert.equal(encode('(01)09501101530003', { format: 'GS1-128' }).text, '(01)09501101530003');
+});
+
+test('format: auto', () => {
+	const cases = { '5901234123457': 'EAN13', '036000291452': 'UPC', '96385074': 'EAN8', '(01)09501101530003': 'GS1-128',
+		'https://example.com': 'QR', 'héllo 世界': 'QR', ['x'.repeat(41)]: 'QR', 'ABC-123': 'CODE128', '1234567890123': 'CODE128' };
+	for (const [v, f] of Object.entries(cases)) assert.equal(detectFormat(v), f, v);
+	assert.equal(encode('https://example.com', { format: 'auto' }).type, 'matrix');
+});
+
+test('init() renders data-barcode elements', () => {
+	const el = { tagName: 'DIV', innerHTML: '', dataset: { barcode: '5901234123457', format: 'EAN13', scale: '3', text: 'false' } };
+	init({ querySelectorAll: () => [el] });
+	assert.equal(el.innerHTML, toSVG('5901234123457', { format: 'EAN13', scale: 3, text: false }));
+});
+
+test('CLI', () => {
+	const run = (...a) => spawnSync(process.execPath, ['bin/barcodejs.js', ...a], { encoding: 'buffer' });
+	assert.match(run('hello', '-f', 'qr').stdout.toString(), /^<svg /);
+	assert.deepEqual([...run('hello', '-t', 'png').stdout.subarray(0, 4)], [137, 80, 78, 71]);
+	const bad = run('123', '-f', 'EAN13');
+	assert.equal(bad.status, 1);
+	assert.match(bad.stderr.toString(), /Invalid EAN13/);
+});
+
+test('React and Vue components render SVG', async () => {
+	const [React, { renderToString }, { Barcode }] = await Promise.all([import('react'), import('react-dom/server'), import('../src/react.js')]);
+	assert.ok(renderToString(React.createElement(Barcode, { value: 'hi', format: 'QR' })).includes(toSVG('hi', { format: 'QR' })));
+	const [Vue, VS, { Barcode: VB }] = await Promise.all([import('vue'), import('@vue/server-renderer'), import('../src/vue.js')]);
+	const html = await VS.renderToString(Vue.createSSRApp({ render: () => Vue.h(VB, { value: 'hi', format: 'QR' }) }));
+	assert.ok(html.includes(toSVG('hi', { format: 'QR' })) && !html.includes('style='));
+});
+
+test('QR styling', () => {
+	const svg = toSVG('hi', { format: 'QR', moduleShape: 'dots', finderShape: 'rounded', finderColor: '#ff0000', logo: 'logo.png' });
+	assert.ok(svg.includes('fill-rule="evenodd"') && svg.includes('fill="#ff0000"') && svg.includes('<image href="logo.png"'));
+	assert.equal(encode('hi', { format: 'QR', logo: 'x' }).version, encode('hi', { format: 'QR', ecLevel: 'H' }).version); // logo -> ECC H
+	const o = { format: 'QR', finderColor: '#ff0000' }, png = Buffer.from(toPNG('hi', o));
+	assert.equal(png[24], 2); // bit depth 2: three palette colors
+	const { width, height, data } = toBitmap(encode('hi', o), o);
+	const raw = inflateSync(png.subarray(png.indexOf('IDAT') + 4, png.indexOf('IDAT') + 4 + png.readUInt32BE(png.indexOf('IDAT') - 4)));
+	const row = Math.ceil(width / 4) + 1;
+	for (let y = 0; y < height; y++) for (let x = 0; x < width; x++)
+		assert.equal((raw[y * row + 1 + (x >> 2)] >> (6 - (x & 3) * 2)) & 3, data[y * width + x]);
+});
+
+test('Data Matrix shapes and Micro QR versions', () => {
+	const r = encode('Rect 1234', { format: 'DATAMATRIX', shape: 'rectangle' });
+	assert.ok(r.width > r.height);
+	assert.deepEqual(['1', 'AB12', 'hello', 'HELLO WORLD 12345'].map((v) => encode(v, { format: 'MICROQR' }).version), ['M1', 'M2', 'M3', 'M4']);
+	assert.throws(() => encode('x'.repeat(40), { format: 'MICROQR' }), /too long/);
 });

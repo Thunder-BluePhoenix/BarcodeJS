@@ -56,9 +56,30 @@ test('Data Matrix decodes across sizes (incl. multi-block)', () => {
 	for (const n of [1, 3, 6, 10, 20, 40, 80, 150, 200, 300, 500, 900, 1300]) {
 		const v = Array.from({ length: n }, (_, i) => String.fromCharCode(65 + (i * 11) % 26)).join('');
 		sizes.add(encode(v, { format: 'DATAMATRIX' }).width);
+		assert.equal(decode(v, { format: 'DATAMATRIX', shape: 'auto', scale: 3, margin: 24 }, 'DATA_MATRIX'), v, `auto len ${n}`);
 		assert.equal(decode(v, { format: 'DATAMATRIX', scale: 3, margin: 24 }, 'DATA_MATRIX'), v, `len ${n}`);
 	}
-	// 144x144 and UTF-8 (ECI) are verified with zxing-cpp; zxing-js can't decode 144x144 even from its own encoder.
-	for (const v of ['12345678901234567890', 'Ünïcödé']) assert.equal(decode(v, { format: 'DATAMATRIX', scale: 3, margin: 24 }, 'DATA_MATRIX'), v);
-	assert.ok(sizes.has(132) && sizes.has(52), [...sizes].join());
+	// 144x144, Base256 and UTF-8 (ECI) are verified with zxing-cpp (test/zxing-cpp); zxing-js mis-decodes them.
+	for (const v of ['12345678901234567890', 'UPPER CASE C40 TEXT', 'lower case text mode', 'Rect 1']) assert.equal(decode(v, { format: 'DATAMATRIX', scale: 3, margin: 24 }, 'DATA_MATRIX'), v);
+	assert.ok(sizes.has(120) && sizes.has(52), [...sizes].join());
+});
+
+test('PDF417 decodes (text, numeric, byte compaction)', () => {
+	for (const v of ['Hello PDF417', '12345678901234567890123456789', 'Mixed: abc ABC 123 !@# end', 'a'.repeat(300)])
+		assert.equal(decode(v, { format: 'PDF417' }, 'PDF_417'), v);
+});
+
+test('Aztec decodes (compact and full-range)', () => {
+	const sizes = new Set();
+	for (const v of ['A', 'Hello Aztec', 'Mixed: abc ABC 123 !@#', '1234567890'.repeat(20), 'X'.repeat(600)]) {
+		sizes.add(encode(v, { format: 'AZTEC' }).compact);
+		assert.equal(decode(v, { format: 'AZTEC', scale: 3, margin: 20 }, 'AZTEC'), v);
+	}
+	assert.deepEqual([...sizes].sort(), [false, true]);
+});
+
+test('QR mixed-mode segmentation decodes and beats single-mode size', () => {
+	const v = 'https://example.com/item/' + '1234567890'.repeat(6);
+	assert.equal(decode(v, { format: 'QR' }, 'QR_CODE'), v);
+	assert.ok(encode(v, { format: 'QR', ecLevel: 'L' }).version <= 4); // single byte mode needs v5
 });

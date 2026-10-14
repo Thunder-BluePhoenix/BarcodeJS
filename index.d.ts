@@ -3,11 +3,11 @@ export type Format =
 	| 'EAN13' | 'EAN8' | 'EAN5' | 'EAN2' | 'UPC' | 'UPCA' | 'UPCE' | 'ISBN' | 'ISSN'
 	| 'CODE39' | 'CODE39FullASCII' | 'CODE93' | 'CODE93FullASCII' | 'CODE11'
 	| 'ITF' | 'ITF14' | 'MSI' | 'MSI10' | 'MSI11' | 'MSI1010' | 'MSI1110'
-	| 'CODABAR' | 'PHARMACODE' | 'QR' | 'QRCODE' | 'DATAMATRIX'
-	| (string & {});
+	| 'CODABAR' | 'PHARMACODE' | 'QR' | 'QRCODE' | 'MICROQR' | 'DATAMATRIX' | 'PDF417' | 'AZTEC'
+	| 'auto' | (string & {});
 
 export interface EncodeOptions {
-	/** Barcode format, case-insensitive. Default: 'CODE128'. */
+	/** Barcode format, case-insensitive. 'auto' picks one from the value. Default: 'CODE128'. */
 	format?: Format;
 	/** EAN-13 / UPC-A / UPC-E / ISBN / ISSN: 2- or 5-digit add-on. */
 	addon?: string;
@@ -15,10 +15,20 @@ export interface EncodeOptions {
 	checksum?: boolean | string;
 	/** CODE39 / CODE93: encode full 7-bit ASCII. */
 	fullASCII?: boolean;
-	/** QR error correction level. Default: 'M'. */
-	ecLevel?: 'L' | 'M' | 'Q' | 'H';
-	/** QR: force a version (1-40) instead of the smallest that fits. */
+	/** QR / Micro QR error correction level (default 'M' for QR, 'H' with a logo; 'L' for Micro QR). PDF417: 0-8. */
+	ecLevel?: 'L' | 'M' | 'Q' | 'H' | number;
+	/** QR: force a version (1-40). Micro QR: 1-4 (M1-M4). */
 	version?: number;
+	/** QR / Data Matrix: value is a GS1 element string "(01)...(10)..." (encoded with FNC1). */
+	gs1?: boolean;
+	/** Data Matrix symbol shape. Default: 'square'. */
+	shape?: 'square' | 'rectangle' | 'auto';
+	/** PDF417 data columns (1-30). Default: chosen for a ~3:1 aspect ratio. */
+	columns?: number;
+	/** PDF417 row height in modules. Default: 3. */
+	rowHeight?: number;
+	/** Aztec minimum error correction percentage. Default: 33. */
+	ecPercent?: number;
 }
 
 export interface RenderOptions {
@@ -37,13 +47,23 @@ export interface RenderOptions {
 	color?: string;
 	/** Background color; null or '' for transparent. Default: '#ffffff'. */
 	background?: string | null;
+	/** 2D module shape (SVG, canvas, PNG). Default: 'square'. */
+	moduleShape?: 'square' | 'dots' | 'rounded';
+	/** QR / Micro QR finder pattern shape. */
+	finderShape?: 'square' | 'rounded';
+	/** QR / Micro QR finder pattern color (PNG: hex). */
+	finderColor?: string;
+	/** Centered logo: URL/data URI (SVG) or a loaded image object (canvas). Not drawn in PNG; the area is cleared. */
+	logo?: string | { src?: string };
+	/** Logo size as a fraction of the symbol width, max 0.3. Default: 0.2. */
+	logoSize?: number;
 }
 
 export type Options = EncodeOptions & RenderOptions;
 
 export interface Segment { bits: string; text?: string; guard?: boolean; textOnly?: boolean; addon?: boolean; }
 export interface LinearSymbol { type: 'linear'; segments: Segment[]; text: string; }
-export interface MatrixSymbol { type: 'matrix'; width: number; height: number; modules: Uint8Array; quiet: number; text: string; version?: number; }
+export interface MatrixSymbol { type: 'matrix'; width: number; height: number; modules: Uint8Array; quiet: number; text: string; version?: number | string; finders?: [number, number][]; }
 export type BarcodeSymbol = LinearSymbol | MatrixSymbol;
 
 export interface Layout {
@@ -58,6 +78,9 @@ type Input = string | number | BarcodeSymbol;
 export const formats: Record<string, (value: string, options?: EncodeOptions) => BarcodeSymbol>;
 export function encode(value: string | number, options?: EncodeOptions): BarcodeSymbol;
 export function isValid(value: string | number, options?: EncodeOptions): boolean;
+export function detectFormat(value: string | number): Format;
+/** Render every [data-barcode] element; other data-* attributes become options. */
+export function init(root?: ParentNode): void;
 export function toSVG(value: Input, options?: Options): string;
 export function toPNG(value: Input, options?: Options): Uint8Array;
 export function toDataURL(value: Input, options?: Options & { type?: 'png' | 'svg' }): string;

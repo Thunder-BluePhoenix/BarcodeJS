@@ -1,5 +1,6 @@
 // QR Code model 2 (ISO/IEC 18004), versions 1-40, ECC levels L/M/Q/H.
 import { rsEncode } from './rs.js';
+import { gs1Parts } from './gs1.js';
 
 // Index 0 unused. Rows: L, M, Q, H.
 const ECC_PER_BLOCK = [
@@ -103,11 +104,13 @@ function alignPositions(ver, size) {
 // Character count bits for QR versions 1-9, 10-26, 27-40
 const CC_BITS = [[10, 12, 14], [9, 11, 13], [8, 16, 16]];
 
-export function qr(value, { ecLevel = 'M', version, gs1 = false, chars } = {}) {
+export function qr(value, { ecLevel, version, gs1 = false, chars, logo } = {}) {
+	ecLevel ??= logo ? 'H' : 'M';
 	const text = String(value);
 	const ecl = ECL[String(ecLevel).toUpperCase()];
 	if (ecl === undefined) throw new Error(`Invalid QR ecLevel: ${ecLevel}`);
-	chars ??= [...text];
+	// gs1: value is "(01)...(10)..." and is encoded with FNC1 in first position
+	chars ??= gs1 ? gs1Parts(text, 'GS1 QR').flatMap((p) => (p === SEP ? [SEP] : [...p])) : [...text];
 	if (!chars.length) throw new Error('QR value is empty');
 
 	// Pick the smallest version that fits (segmentation depends on the count-field sizes)
@@ -234,7 +237,7 @@ export function qr(value, { ecLevel = 'M', version, gs1 = false, chars } = {}) {
 	}
 	applyMask(best); drawFormat(best);
 
-	return { type: 'matrix', width: size, height: size, modules: mod, quiet: 4, text, version: ver };
+	return { type: 'matrix', width: size, height: size, modules: mod, quiet: 4, text, version: ver, finders: [[0, 0], [size - 7, 0], [0, size - 7]] };
 }
 
 function penalty(mod, size) {

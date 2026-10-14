@@ -30,7 +30,8 @@
 <script>
 	const { toSVG, toDataURL, isValid } = BarcodeJS;
 	const samples = {
-		QR: 'https://example.com', DATAMATRIX: 'BarcodeJS 2026', CODE128: 'Hello World', 'GS1-128': '(01)09501101530003(17)250101(10)ABC123',
+		auto: 'https://github.com/Thunder-BluePhoenix/BarcodeJS', QR: 'https://example.com', MICROQR: 'HELLO 123', DATAMATRIX: 'BarcodeJS 2026',
+		PDF417: 'PDF417 boarding pass M1DOE/JOHN', AZTEC: 'Aztec ticket 12345', CODE128: 'Hello World', 'GS1-128': '(01)09501101530003(17)250101(10)ABC123',
 		EAN13: '5901234123457', UPC: '036000291452', UPCE: '01234565', ISBN: '978-0-306-40615-7', ISSN: '0317-8471',
 		CODE39: 'CODE-39', CODE93: 'CODE93', CODE11: '123-45', ITF14: '1234567890123', CODABAR: 'A40156B', MSI10: '1234567', PHARMACODE: '1234',
 	};
@@ -43,8 +44,14 @@
 	$('value').oninput = draw;
 	$('format').onchange = () => { $('value').value = samples[$('format').value]; draw(); };
 	$('png').onclick = () => Object.assign(document.createElement('a'), { href: toDataURL($('value').value, { format: $('format').value }), download: 'barcode.png' }).click();
+	const extra = {
+		EAN13: { addon: '12' },
+		'styled QR': { format: 'QR', moduleShape: 'dots', finderShape: 'rounded', finderColor: '#1a3c8f', scale: 5 },
+	};
+	samples['styled QR'] = 'https://example.com/styled';
 	for (const [format, v] of Object.entries(samples))
-		$('grid').insertAdjacentHTML('beforeend', `<figure>${toSVG(v, { format, ...(format === 'EAN13' ? { addon: '12' } : {}) })}<figcaption>${format}</figcaption></figure>`);
+		if (format !== 'auto') $('grid').insertAdjacentHTML('beforeend', `<figure>${toSVG(v, { format, ...extra[format] })}<figcaption>${format}</figcaption></figure>`);
+	delete samples['styled QR'];
 	draw();
 </script>
 </body>

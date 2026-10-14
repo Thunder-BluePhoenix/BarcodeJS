@@ -1,7 +1,7 @@
 {
   "name": "barcodejs",
   "version": "1.0.0",
-  "description": "Zero-dependency barcode generator: QR, Data Matrix, Code 128, GS1-128, EAN/UPC, ISBN and more. SVG, PNG and canvas output in Node and browsers.",
+  "description": "Zero-dependency barcode generator: QR, Micro QR, Data Matrix, PDF417, Aztec, Code 128, GS1, EAN/UPC, ISBN and more. SVG, PNG and canvas in Node and browsers, plus CLI, React and Vue.",
   "type": "module",
   "main": "./src/index.js",
   "types": "./index.d.ts",
@@ -14,23 +14,37 @@
     "./linear": "./src/linear.js",
     "./code128": "./src/code128.js",
     "./qr": "./src/qr.js",
-    "./datamatrix": "./src/datamatrix.js"
+    "./datamatrix": "./src/datamatrix.js",
+    "./react": {
+      "types": "./frameworks.d.ts",
+      "default": "./src/react.js"
+    },
+    "./vue": {
+      "types": "./frameworks.d.ts",
+      "default": "./src/vue.js"
+    },
+    "./microqr": "./src/microqr.js",
+    "./pdf417": "./src/pdf417.js",
+    "./aztec": "./src/aztec.js"
   },
   "unpkg": "./dist/barcode.min.js",
   "jsdelivr": "./dist/barcode.min.js",
   "files": [
     "src/*.js",
     "dist/*.js",
-    "index.d.ts"
+    "index.d.ts",
+    "bin",
+    "frameworks.d.ts"
   ],
   "sideEffects": false,
   "engines": {
     "node": ">=18"
   },
   "scripts": {
-    "test": "node --test",
+    "test": "node --test test/*.test.js",
     "build": "esbuild src/index.js --bundle --minify --format=iife --global-name=BarcodeJS --outfile=dist/barcode.min.js && esbuild src/index.js --bundle --minify --format=esm --outfile=dist/barcode.esm.min.js",
-    "prepublishOnly": "npm test && npm run build"
+    "prepublishOnly": "npm test && npm run build",
+    "test:zxing-cpp": "node test/zxing-cpp/cases.mjs .zxing-cpp-out && python3 test/zxing-cpp/check.py .zxing-cpp-out"
   },
   "repository": {
     "type": "git",
@@ -48,11 +62,37 @@
     "isbn",
     "svg",
     "png",
-    "canvas"
+    "canvas",
+    "pdf417",
+    "aztec",
+    "microqr",
+    "gs1",
+    "cli",
+    "react",
+    "vue"
   ],
   "license": "MIT",
   "devDependencies": {
+    "@vue/server-renderer": "^3.4.38",
     "@zxing/library": "^0.21.3",
-    "esbuild": "^0.25.0"
+    "esbuild": "^0.25.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "vue": "^3.4.38"
+  },
+  "bin": {
+    "barcodejs": "bin/barcodejs.js"
+  },
+  "peerDependencies": {
+    "react": ">=16.8",
+    "vue": ">=3"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    },
+    "vue": {
+      "optional": true
+    }
   }
 }
