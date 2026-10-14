@@ -1,14 +1,15 @@
 {
-  "name": "barcodejs",
+  "name": "@thunder-bluephoenix/barcodejs",
   "version": "1.0.0",
   "description": "Zero-dependency barcode generator: QR, Micro QR, Data Matrix, PDF417, Aztec, Code 128, GS1, EAN/UPC, ISBN and more. SVG, PNG and canvas in Node and browsers, plus CLI, React and Vue.",
   "type": "module",
-  "main": "./src/index.js",
+  "main": "./dist/index.cjs",
   "types": "./index.d.ts",
   "exports": {
     ".": {
       "types": "./index.d.ts",
-      "default": "./src/index.js"
+      "import": "./src/index.js",
+      "require": "./dist/index.cjs"
     },
     "./render": "./src/render.js",
     "./linear": "./src/linear.js",
@@ -25,7 +26,15 @@
     },
     "./microqr": "./src/microqr.js",
     "./pdf417": "./src/pdf417.js",
-    "./aztec": "./src/aztec.js"
+    "./aztec": "./src/aztec.js",
+    "./element": "./src/element.js",
+    "./decode": {
+      "types": "./decode.d.ts",
+      "default": "./src/decode.js"
+    },
+    "./rmqr": "./src/rmqr.js",
+    "./databar": "./src/databar.js",
+    "./postal": "./src/postal.js"
   },
   "unpkg": "./dist/barcode.min.js",
   "jsdelivr": "./dist/barcode.min.js",
@@ -34,7 +43,8 @@
     "dist/*.js",
     "index.d.ts",
     "bin",
-    "frameworks.d.ts"
+    "frameworks.d.ts",
+    "decode.d.ts"
   ],
   "sideEffects": false,
   "engines": {
@@ -42,9 +52,12 @@
   },
   "scripts": {
     "test": "node --test test/*.test.js",
-    "build": "esbuild src/index.js --bundle --minify --format=iife --global-name=BarcodeJS --outfile=dist/barcode.min.js && esbuild src/index.js --bundle --minify --format=esm --outfile=dist/barcode.esm.min.js",
+    "build": "esbuild src/browser.js --bundle --minify --format=iife --global-name=BarcodeJS --outfile=dist/barcode.min.js && esbuild src/index.js --bundle --minify --format=esm --outfile=dist/barcode.esm.min.js && esbuild src/index.js --bundle --format=cjs --platform=node --target=node18 --outfile=dist/index.cjs",
     "prepublishOnly": "npm test && npm run build",
-    "test:zxing-cpp": "node test/zxing-cpp/cases.mjs .zxing-cpp-out && python3 test/zxing-cpp/check.py .zxing-cpp-out"
+    "test:zxing-cpp": "node test/zxing-cpp/cases.mjs .zxing-cpp-out && python3 test/zxing-cpp/check.py .zxing-cpp-out",
+    "pretest": "npm run build --silent",
+    "size": "node scripts/size.mjs",
+    "version": "node -e \"const f='jsr.json',j=JSON.parse(require('fs').readFileSync(f));j.version=require('./package.json').version;require('fs').writeFileSync(f,JSON.stringify(j,null,2)+'\\n')\" && git add jsr.json"
   },
   "repository": {
     "type": "git",
@@ -75,6 +88,7 @@
   "devDependencies": {
     "@vue/server-renderer": "^3.4.38",
     "@zxing/library": "^0.21.3",
+    "bwip-js": "^4.11.4",
     "esbuild": "^0.25.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
@@ -94,5 +108,9 @@
     "vue": {
       "optional": true
     }
-  }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "module": "./src/index.js"
 }

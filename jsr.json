@@ -1,0 +1,33 @@
+{
+  "name": "@thunder-bluephoenix/barcodejs",
+  "version": "1.0.0",
+  "exports": {
+    ".": "./src/index.js",
+    "./render": "./src/render.js",
+    "./qr": "./src/qr.js",
+    "./microqr": "./src/microqr.js",
+    "./datamatrix": "./src/datamatrix.js",
+    "./pdf417": "./src/pdf417.js",
+    "./aztec": "./src/aztec.js",
+    "./code128": "./src/code128.js",
+    "./linear": "./src/linear.js",
+    "./decode": "./src/decode.js",
+    "./rmqr": "./src/rmqr.js",
+    "./databar": "./src/databar.js",
+    "./postal": "./src/postal.js",
+    "./element": "./src/element.js"
+  },
+  "publish": {
+    "include": [
+      "src/**/*.js",
+      "index.d.ts",
+      "README.md",
+      "LICENSE",
+      "decode.d.ts"
+    ],
+    "exclude": [
+      "src/react.js",
+      "src/vue.js"
+    ]
+  }
+}

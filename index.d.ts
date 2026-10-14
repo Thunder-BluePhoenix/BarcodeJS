@@ -3,7 +3,8 @@ export type Format =
 	| 'EAN13' | 'EAN8' | 'EAN5' | 'EAN2' | 'UPC' | 'UPCA' | 'UPCE' | 'ISBN' | 'ISSN'
 	| 'CODE39' | 'CODE39FullASCII' | 'CODE93' | 'CODE93FullASCII' | 'CODE11'
 	| 'ITF' | 'ITF14' | 'MSI' | 'MSI10' | 'MSI11' | 'MSI1010' | 'MSI1110'
-	| 'CODABAR' | 'PHARMACODE' | 'QR' | 'QRCODE' | 'MICROQR' | 'DATAMATRIX' | 'PDF417' | 'AZTEC'
+	| 'CODABAR' | 'PHARMACODE' | 'QR' | 'QRCODE' | 'MICROQR' | 'RMQR' | 'DATAMATRIX' | 'PDF417' | 'AZTEC'
+	| 'DATABAR' | 'DATABAR-LIMITED' | 'DATABAR-EXPANDED' | 'ROYALMAIL' | 'IMB' | 'AUSPOST'
 	| 'auto' | (string & {});
 
 export interface EncodeOptions {
@@ -17,12 +18,18 @@ export interface EncodeOptions {
 	fullASCII?: boolean;
 	/** QR / Micro QR error correction level (default 'M' for QR, 'H' with a logo; 'L' for Micro QR). PDF417: 0-8. */
 	ecLevel?: 'L' | 'M' | 'Q' | 'H' | number;
-	/** QR: force a version (1-40). Micro QR: 1-4 (M1-M4). */
-	version?: number;
+	/** QR: force a version (1-40). Micro QR: 1-4 (M1-M4). rMQR: e.g. 'R13x59'. */
+	version?: number | string;
+	/** rMQR: raise ECC level M to H when the data still fits (default true). */
+	boost?: boolean;
 	/** QR / Data Matrix: value is a GS1 element string "(01)...(10)..." (encoded with FNC1). */
 	gs1?: boolean;
 	/** Data Matrix symbol shape. Default: 'square'. */
 	shape?: 'square' | 'rectangle' | 'auto';
+	/** Data Matrix: include DMRE rectangular sizes (ISO/IEC 21471). */
+	dmre?: boolean;
+	/** Data Matrix: force a size, e.g. '24x24' or '8x80' (rows x columns). */
+	size?: string;
 	/** PDF417 data columns (1-30). Default: chosen for a ~3:1 aspect ratio. */
 	columns?: number;
 	/** PDF417 row height in modules. Default: 3. */
@@ -34,7 +41,7 @@ export interface EncodeOptions {
 export interface RenderOptions {
 	/** Pixels per module. Default: 2 (linear), 4 (2D). */
 	scale?: number;
-	/** Bar height in px (linear). Default: 100. */
+	/** Bar height in px (linear; 4-state postal default 8 x scale). Default: 100. */
 	height?: number;
 	/** Quiet zone in px. Default: 10 (linear), spec quiet zone x scale (2D). */
 	margin?: number;
@@ -47,6 +54,8 @@ export interface RenderOptions {
 	color?: string;
 	/** Background color; null or '' for transparent. Default: '#ffffff'. */
 	background?: string | null;
+	/** SVG <title> for screen readers. Default: the encoded value; false omits it. */
+	title?: string | false;
 	/** 2D module shape (SVG, canvas, PNG). Default: 'square'. */
 	moduleShape?: 'square' | 'dots' | 'rounded';
 	/** QR / Micro QR finder pattern shape. */
@@ -64,7 +73,9 @@ export type Options = EncodeOptions & RenderOptions;
 export interface Segment { bits: string; text?: string; guard?: boolean; textOnly?: boolean; addon?: boolean; }
 export interface LinearSymbol { type: 'linear'; segments: Segment[]; text: string; }
 export interface MatrixSymbol { type: 'matrix'; width: number; height: number; modules: Uint8Array; quiet: number; text: string; version?: number | string; finders?: [number, number][]; }
-export type BarcodeSymbol = LinearSymbol | MatrixSymbol;
+/** 4-state postal symbol: F = full, A = ascender, D = descender, T = tracker */
+export interface FourStateSymbol { type: 'fourstate'; bars: string; text: string; }
+export type BarcodeSymbol = LinearSymbol | MatrixSymbol | FourStateSymbol;
 
 export interface Layout {
 	width: number;

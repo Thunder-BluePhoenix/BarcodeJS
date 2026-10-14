@@ -24,6 +24,9 @@
 </form>
 <div id="out"></div>
 <p id="err" role="alert"></p>
+<h2>Web component</h2>
+<p><bar-code value="5901234123457" format="EAN13" scale="2"></bar-code>
+<bar-code value="https://example.com" format="QR" module-shape="dots" finder-shape="rounded" scale="3"></bar-code></p>
 <div class="grid" id="grid"></div>
 
 <script src="../dist/barcode.min.js"></script>
@@ -31,7 +34,9 @@
 	const { toSVG, toDataURL, isValid } = BarcodeJS;
 	const samples = {
 		auto: 'https://github.com/Thunder-BluePhoenix/BarcodeJS', QR: 'https://example.com', MICROQR: 'HELLO 123', DATAMATRIX: 'BarcodeJS 2026',
-		PDF417: 'PDF417 boarding pass M1DOE/JOHN', AZTEC: 'Aztec ticket 12345', CODE128: 'Hello World', 'GS1-128': '(01)09501101530003(17)250101(10)ABC123',
+		PDF417: 'PDF417 boarding pass M1DOE/JOHN', AZTEC: 'Aztec ticket 12345', RMQR: 'https://example.com/rmqr', CODE128: 'Hello World',
+		'DATABAR': '0950110153000', 'DATABAR-LIMITED': '1950110153000', 'DATABAR-EXPANDED': '(01)09501101530003(3103)001750(10)ABC123',
+		ROYALMAIL: 'LU178XE2B', IMB: '0123456709498765432101234567891', AUSPOST: '5956439111ABA 9', 'GS1-128': '(01)09501101530003(17)250101(10)ABC123',
 		EAN13: '5901234123457', UPC: '036000291452', UPCE: '01234565', ISBN: '978-0-306-40615-7', ISSN: '0317-8471',
 		CODE39: 'CODE-39', CODE93: 'CODE93', CODE11: '123-45', ITF14: '1234567890123', CODABAR: 'A40156B', MSI10: '1234567', PHARMACODE: '1234',
 	};

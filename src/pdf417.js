@@ -1,5 +1,6 @@
 // PDF417 (ISO/IEC 15438): text / byte / numeric compaction, GF(929) error correction, UTF-8 via ECI.
 import { patterns } from './pdf417-table.js';
+import { charsetBytes } from './charset.js';
 
 const START = '11111111010101000', STOP = '111111101000101001';
 const LATCH_TEXT = 900, LATCH_BYTE = 901, LATCH_BYTE6 = 924, LATCH_NUM = 902;
@@ -112,10 +113,9 @@ function ecc(data, k) {
 
 export function pdf417(value, { ecLevel, columns, rowHeight = 3 } = {}) {
 	const text = String(value);
-	const latin1 = [...text].every((c) => c.codePointAt(0) < 256);
-	const bytes = latin1 ? [...text].map((c) => c.charCodeAt(0)) : [...new TextEncoder().encode(text)];
+	const { bytes, eci } = charsetBytes(text);
 	if (!bytes.length) throw new Error('PDF417 value is empty');
-	const data = [...(latin1 ? [] : [927, 26]), ...highLevel(bytes)]; // ECI 000026 = UTF-8
+	const data = [...(eci ? [927, eci] : []), ...highLevel(bytes)];
 
 	const n = data.length + 1; // + length descriptor
 	let ec = ecLevel ?? (n <= 40 ? 2 : n <= 160 ? 3 : n <= 320 ? 4 : n <= 863 ? 5 : 6);

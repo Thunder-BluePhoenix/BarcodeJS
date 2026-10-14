@@ -1,9 +1,13 @@
+// @ts-self-types="../index.d.ts"
 import * as L from './linear.js';
 import { code128, gs1128 } from './code128.js';
 import { qr } from './qr.js';
 import { microqr } from './microqr.js';
+import { rmqr } from './rmqr.js';
 import { pdf417 } from './pdf417.js';
 import { aztec } from './aztec.js';
+import { databar, databarLimited, databarExpanded } from './databar.js';
+import { royalmail, imb, auspost } from './postal.js';
 import { datamatrix } from './datamatrix.js';
 import * as R from './render.js';
 
@@ -12,6 +16,7 @@ const fixed = (fn, extra) => (v, o) => fn(v, { ...o, ...extra });
 // Format name (case-insensitive, '-'/'_' ignored) -> encoder(value, options) -> symbol
 export const formats = {
 	CODE128: code128, GS1128: gs1128, EAN128: gs1128,
+	DATABAR: databar, DATABAROMNI: databar, GS1DATABAR: databar, DATABARLIMITED: databarLimited, DATABAREXPANDED: databarExpanded,
 	EAN13: L.ean13, EAN8: L.ean8, EAN5: L.ean5, EAN2: L.ean2, UPC: L.upca, UPCA: L.upca, UPCE: L.upce,
 	ISBN: L.isbn, ISSN: L.issn,
 	CODE39: L.code39, CODE39FULLASCII: fixed(L.code39, { fullASCII: true }),
@@ -20,7 +25,8 @@ export const formats = {
 	MSI: L.msi, MSI10: fixed(L.msi, { checksum: 'mod10' }), MSI11: fixed(L.msi, { checksum: 'mod11' }),
 	MSI1010: fixed(L.msi, { checksum: 'mod1010' }), MSI1110: fixed(L.msi, { checksum: 'mod1110' }),
 	CODABAR: L.codabar, PHARMACODE: L.pharmacode,
-	QR: qr, QRCODE: qr, MICROQR: microqr, DATAMATRIX: datamatrix, PDF417: pdf417, AZTEC: aztec,
+	ROYALMAIL: royalmail, RM4SCC: royalmail, IMB: imb, USPSIMB: imb, ONECODE: imb, AUSPOST: auspost,
+	QR: qr, QRCODE: qr, MICROQR: microqr, RMQR: rmqr, DATAMATRIX: datamatrix, PDF417: pdf417, AZTEC: aztec,
 };
 
 // format: 'auto' picks a format from the value's shape

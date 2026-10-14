@@ -3,21 +3,26 @@ import { rsEncode } from './rs.js';
 import { gs1Parts } from './gs1.js';
 
 // Index 0 unused. Rows: L, M, Q, H.
-const ECC_PER_BLOCK = [
+export const ECC_PER_BLOCK = [
 	[-1, 7, 10, 15, 20, 26, 18, 20, 24, 30, 18, 20, 24, 26, 30, 22, 24, 28, 30, 28, 28, 28, 28, 30, 30, 26, 28, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30],
 	[-1, 10, 16, 26, 18, 24, 16, 18, 22, 22, 26, 30, 22, 22, 24, 24, 28, 28, 26, 26, 26, 26, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28],
 	[-1, 13, 22, 18, 26, 18, 24, 18, 22, 20, 24, 28, 26, 24, 20, 30, 24, 28, 28, 26, 30, 28, 30, 30, 30, 30, 28, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30],
 	[-1, 17, 28, 22, 16, 22, 28, 26, 26, 24, 28, 24, 28, 22, 24, 24, 30, 28, 28, 26, 28, 30, 24, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30],
 ];
-const NUM_BLOCKS = [
+export const NUM_BLOCKS = [
 	[-1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 4, 4, 4, 4, 4, 6, 6, 6, 6, 7, 8, 8, 9, 9, 10, 12, 12, 12, 13, 14, 15, 16, 17, 18, 19, 19, 20, 21, 22, 24, 25],
 	[-1, 1, 1, 1, 2, 2, 4, 4, 4, 5, 5, 5, 8, 9, 9, 10, 10, 11, 13, 14, 16, 17, 17, 18, 20, 21, 23, 25, 26, 28, 29, 31, 33, 35, 37, 38, 40, 43, 45, 47, 49],
 	[-1, 1, 1, 2, 2, 4, 4, 6, 6, 8, 8, 8, 10, 12, 16, 12, 17, 16, 18, 21, 20, 23, 23, 25, 27, 29, 34, 34, 35, 38, 40, 43, 45, 48, 51, 53, 56, 59, 62, 65, 68],
 	[-1, 1, 1, 2, 4, 4, 4, 5, 6, 8, 8, 11, 11, 16, 16, 18, 16, 19, 21, 25, 25, 25, 34, 30, 32, 35, 37, 40, 42, 45, 48, 51, 54, 57, 60, 63, 66, 70, 74, 77, 81],
 ];
+export const MASKS = [
+	(x, y) => (x + y) % 2 === 0, (x, y) => y % 2 === 0, (x) => x % 3 === 0, (x, y) => (x + y) % 3 === 0,
+	(x, y) => (Math.floor(x / 3) + Math.floor(y / 2)) % 2 === 0, (x, y) => ((x * y) % 2) + ((x * y) % 3) === 0,
+	(x, y) => (((x * y) % 2) + ((x * y) % 3)) % 2 === 0, (x, y) => (((x + y) % 2) + ((x * y) % 3)) % 2 === 0,
+];
 const ECL = { L: 0, M: 1, Q: 2, H: 3 };
 const FORMAT_BITS = [1, 0, 3, 2];
-const ALNUM = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:';
+export const ALNUM = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:';
 export const SEP = null; // GS1 FNC1 separator in a character list
 
 // Encoding modes. cost() is in 1/6 bit so numeric (10 bits / 3 chars) stays integral.
@@ -80,7 +85,7 @@ const toBytes = (bits) => {
 	return out;
 };
 
-const rawModules = (ver) => {
+export const rawModules = (ver) => {
 	let r = (16 * ver + 128) * ver + 64;
 	if (ver >= 2) {
 		const n = Math.floor(ver / 7) + 2;
@@ -92,7 +97,7 @@ const rawModules = (ver) => {
 const dataCodewords = (ver, ecl) =>
 	Math.floor(rawModules(ver) / 8) - ECC_PER_BLOCK[ecl][ver] * NUM_BLOCKS[ecl][ver];
 
-function alignPositions(ver, size) {
+export function alignPositions(ver, size) {
 	if (ver === 1) return [];
 	const n = Math.floor(ver / 7) + 2;
 	const step = Math.floor((ver * 8 + n * 3 + 5) / (n * 4 - 4)) * 2;
@@ -102,7 +107,7 @@ function alignPositions(ver, size) {
 }
 
 // Character count bits for QR versions 1-9, 10-26, 27-40
-const CC_BITS = [[10, 12, 14], [9, 11, 13], [8, 16, 16]];
+export const CC_BITS = [[10, 12, 14], [9, 11, 13], [8, 16, 16]];
 
 export function qr(value, { ecLevel, version, gs1 = false, chars, logo } = {}) {
 	ecLevel ??= logo ? 'H' : 'M';
@@ -219,11 +224,6 @@ export function qr(value, { ecLevel, version, gs1 = false, chars, logo } = {}) {
 	}
 
 	// Pick the mask with the lowest penalty
-	const MASKS = [
-		(x, y) => (x + y) % 2 === 0, (x, y) => y % 2 === 0, (x) => x % 3 === 0, (x, y) => (x + y) % 3 === 0,
-		(x, y) => (Math.floor(x / 3) + Math.floor(y / 2)) % 2 === 0, (x, y) => ((x * y) % 2) + ((x * y) % 3) === 0,
-		(x, y) => (((x * y) % 2) + ((x * y) % 3)) % 2 === 0, (x, y) => (((x + y) % 2) + ((x * y) % 3)) % 2 === 0,
-	];
 	const applyMask = (m) => {
 		for (let y = 0; y < size; y++)
 			for (let x = 0; x < size; x++) if (!fn[y * size + x] && MASKS[m](x, y)) mod[y * size + x] ^= 1;

@@ -12,6 +12,6 @@ for m in json.load(open(f"{d}/meta.json")):
     got = [r.text for r in zxingcpp.read_barcodes(img)]
     ok = any(t in m["expect"] for t in got)
     failed += not ok
-    print("ok  " if ok else "FAIL", m["format"], repr(m["value"]), "" if ok else f"-> {got!r}")
+    print("ok  " if ok else "FAIL", m["format"], repr(m["value"]), "" if ok else f"{m.get('opts') or ''} -> {got!r}")
 print(f"{failed} failed")
 sys.exit(1 if failed else 0)

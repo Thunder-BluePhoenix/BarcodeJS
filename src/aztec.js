@@ -1,5 +1,6 @@
 // Aztec Code (ISO/IEC 24778): compact (1-4 layers) and full-range (4-32 layers), UTF-8 via ECI.
 import { rsEncode } from './rs.js';
+import { charsetBytes } from './charset.js';
 
 const U = 0, L = 1, D = 2, M = 3, P = 4;
 const WIDTH = [5, 5, 4, 5, 5];
@@ -23,35 +24,54 @@ const LATCH = [
 	[[[29, 5]], [[28, 5]], [[29, 5], [30, 5]], null, [[30, 5]]],
 	[[[31, 5]], [[31, 5], [28, 5]], [[31, 5], [30, 5]], [[31, 5], [29, 5]], null],
 ];
-const latchCost = (a, b) => (a === b ? 0 : LATCH[a][b].reduce((s, [, n]) => s + n, 0));
 
+const PAIRS = { '\r\n': 2, '. ': 3, ', ': 4, ': ': 5 }; // two-character punctuation codes
+const MODES_ALL = [U, L, D, M, P];
+
+// Fewest bits by dynamic programming over (position, latched mode): latches, P/S and U/S shifts,
+// punctuation pairs and binary shift runs (short form up to 31 bytes, long form beyond).
 function highLevel(bytes, eci) {
-	const bits = [];
-	const push = (v, n) => { for (let i = n - 1; i >= 0; i--) bits.push((v >>> i) & 1); };
-	let mode = U;
-	const latch = (to) => { for (const [v, n] of LATCH[mode][to]) push(v, n); mode = to; };
-	if (eci) { push(0, 5); push(0, 5); push(2, 3); push(4, 4); push(8, 4); } // P/S FLG(2) "26"
-	for (let i = 0; i < bytes.length;) {
-		const b = bytes[i];
-		if (code(mode, b) >= 0) { push(code(mode, b), WIDTH[mode]); i++; continue; }
-		const modes = [U, L, M, P, D].filter((m) => code(m, b) >= 0);
-		if (!modes.length) {
-			// Binary shift for a run of bytes no mode can hold
-			if (mode === D || mode === P) latch(U);
-			let n = 0;
-			while (i + n < bytes.length && n < 31 && [U, L, M, P, D].every((m) => code(m, bytes[i + n]) < 0)) n++;
-			push(31, 5); push(n, 5);
-			for (let k = 0; k < n; k++) push(bytes[i + k], 8);
-			i += n;
-			continue;
+	const n = bytes.length;
+	const cost = Array.from({ length: n + 1 }, () => new Array(5).fill(Infinity));
+	const back = Array.from({ length: n + 1 }, () => new Array(5));
+	const seqBits = (seq) => seq.reduce((a, [, w]) => a + w, 0);
+	const head = [];
+	if (eci) { // P/S FLG(n) + n ECI digits, from upper mode at the start
+		head.push([0, 5], [0, 5], [String(eci).length, 3]);
+		for (const d of String(eci)) head.push([+d + 2, 4]);
+	}
+	cost[0][U] = 0;
+	for (let i = 0; i < n; i++)
+		for (const m of MODES_ALL) {
+			const c = cost[i][m];
+			if (c === Infinity) continue;
+			const go = (j, t, seq, bin) => {
+				const v = c + seqBits(seq) + (bin ? 8 * bin : 0);
+				if (v < cost[j][t]) { cost[j][t] = v; back[j][t] = { i, m, seq, bin }; }
+			};
+			const b = bytes[i];
+			for (const t of MODES_ALL) if (code(t, b) >= 0) go(i + 1, t, [...(t === m ? [] : LATCH[m][t]), [code(t, b), WIDTH[t]]]);
+			const pair = PAIRS[String.fromCharCode(b, bytes[i + 1] ?? 0)];
+			if (pair) {
+				go(i + 2, P, [...(m === P ? [] : LATCH[m][P]), [pair, 5]]);
+				if (m !== P) go(i + 2, m, [[0, WIDTH[m]], [pair, 5]]);
+			}
+			if (m !== P && code(P, b) >= 0) go(i + 1, m, [[0, WIDTH[m]], [code(P, b), 5]]);
+			if ((m === L || m === D) && code(U, b) >= 0) go(i + 1, m, [[m === L ? 28 : 15, WIDTH[m]], [code(U, b), 5]]);
+			// Binary shift (from D or P: latch to upper first)
+			const from = m === D || m === P ? U : m, pre = from === m ? [] : LATCH[m][U];
+			for (let k = 1; k <= Math.min(31, n - i); k++) go(i + k, from, [...pre, [31, 5], [k, 5]], k);
+			for (let k = 32; k <= Math.min(2078, n - i); k++) go(i + k, from, [...pre, [31, 5], [0, 5], [k - 31, 11]], k);
 		}
-		const next = bytes[i + 1];
-		const target = modes.find((m) => next !== undefined && code(m, next) >= 0) ?? modes.sort((a, b2) => latchCost(mode, a) - latchCost(mode, b2))[0];
-		const nextFits = next !== undefined && code(target, next) >= 0;
-		if (!nextFits && target === P && mode !== P) { push(0, WIDTH[mode]); push(code(P, b), 5); }
-		else if (!nextFits && target === U && (mode === L || mode === D)) { push(mode === L ? 28 : 15, WIDTH[mode]); push(code(U, b), 5); }
-		else { latch(target); push(code(target, b), WIDTH[target]); }
-		i++;
+	let m = MODES_ALL.reduce((a, t) => (cost[n][t] < cost[n][a] ? t : a), U);
+	const steps = [];
+	for (let j = n; j > 0;) { const st = back[j][m]; steps.unshift({ ...st, j }); j = st.i; m = st.m; }
+	const bits = [];
+	const push = (v, w) => { for (let k = w - 1; k >= 0; k--) bits.push((v >>> k) & 1); };
+	for (const [v, w] of head) push(v, w);
+	for (const { i, seq, bin } of steps) {
+		for (const [v, w] of seq) push(v, w);
+		if (bin) for (let k = 0; k < bin; k++) push(bytes[i + k], 8);
 	}
 	return bits;
 }
@@ -83,9 +103,8 @@ function checkWords(words, totalBits, w) {
 
 export function aztec(value, { ecPercent = 33 } = {}) {
 	const text = String(value);
-	const latin1 = [...text].every((c) => c.codePointAt(0) < 256);
-	const bytes = latin1 ? [...text].map((c) => c.charCodeAt(0)) : [...new TextEncoder().encode(text)];
-	const bits = highLevel(bytes, !latin1);
+	const { bytes, eci } = charsetBytes(text);
+	const bits = highLevel(bytes, eci);
 
 	const eccBits = Math.floor((bits.length * ecPercent) / 100) + 11;
 	let compact, layers, w, words;

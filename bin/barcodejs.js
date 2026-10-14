@@ -2,8 +2,11 @@
 import { parseArgs } from 'node:util';
 import { writeFileSync, readFileSync } from 'node:fs';
 import { toSVG, toPNG, formats } from '../src/index.js';
+import { decode } from '../src/decode.js';
+import { readPNG } from './png.js';
 
 const HELP = `Usage: barcodejs <value> [options]      (value "-" reads stdin)
+       barcodejs --decode <image.png> [--json]   read QR / EAN / UPC / Code 128 / Code 39 / ITF
 
   -f, --format <name>     ${Object.keys(formats).join(', ')}, or auto (default: CODE128)
   -o, --output <file>     .svg or .png (default: SVG to stdout)
@@ -35,6 +38,7 @@ try {
 			format: { type: 'string', short: 'f' }, output: { type: 'string', short: 'o' }, type: { type: 'string', short: 't' },
 			scale: { type: 'string', short: 's' }, 'ec-level': { type: 'string', short: 'e' },
 			'no-text': { type: 'boolean' }, transparent: { type: 'boolean' }, gs1: { type: 'boolean' }, help: { type: 'boolean', short: 'h' },
+			decode: { type: 'boolean', short: 'd' }, json: { type: 'boolean' }, dmre: { type: 'boolean' },
 		},
 	});
 } catch (e) {
@@ -47,10 +51,22 @@ if (a.help || positionals.length !== 1) {
 	process.exit(a.help ? 0 : 2);
 }
 
+if (a.decode) {
+	try {
+		const results = decode(readPNG(readFileSync(positionals[0])));
+		if (!results.length) { console.error('barcodejs: no barcode found'); process.exit(1); }
+		console.log(a.json ? JSON.stringify(results, null, 2) : results.map((r) => r.text).join('\n'));
+	} catch (e) {
+		console.error(`barcodejs: ${e.message}`);
+		process.exit(1);
+	}
+	process.exit(0);
+}
+
 const camel = (k) => k.replace(/-(\w)/g, (_, c) => c.toUpperCase());
 const options = {};
 for (const [k, v] of Object.entries(a)) {
-	if (['output', 'type', 'no-text', 'transparent', 'help'].includes(k)) continue;
+	if (['output', 'type', 'no-text', 'transparent', 'help', 'decode', 'json'].includes(k)) continue;
 	options[camel(k)] = num.includes(k) ? Number(v) : v;
 }
 if (a['no-text']) options.text = false;

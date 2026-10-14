@@ -57,6 +57,18 @@ export function layout(symbol, options = {}) {
 		return { width: w * s + 2 * m, height: h * s + 2 * m, rects, shapes, texts, image, o };
 	}
 
+	if (symbol.type === 'fourstate') {
+		// Bars one module wide with one-module gaps; tracker is the middle third, ascender/descender two thirds
+		const s = o.scale ?? 2, m = o.margin ?? 10, h = options.height ?? 8 * s;
+		[...symbol.bars].forEach((b, i) => {
+			const top = b === 'F' || b === 'A' ? 0 : h / 3, bottom = b === 'F' || b === 'D' ? h : (2 * h) / 3;
+			rects.push([m + i * 2 * s, m + top, s, bottom - top]);
+		});
+		if (typeof o.text === 'string') texts.push({ x: m + symbol.bars.length * s, y: m + h + o.textMargin + o.fontSize, text: o.text, anchor: 'middle', size: o.fontSize });
+		const textH = typeof o.text === 'string' ? o.fontSize + o.textMargin : 0;
+		return { width: (symbol.bars.length * 2 - 1) * s + 2 * m, height: h + textH + 2 * m, rects, shapes, texts, o };
+	}
+
 	const s = o.scale ?? 2, m = o.margin ?? 10, h = o.height;
 	const show = o.text !== false;
 	const override = typeof o.text === 'string';
@@ -79,7 +91,12 @@ export function layout(symbol, options = {}) {
 		x += w;
 	}
 	if (override) texts.push({ x: x / 2 + m / 2, y: m + h + o.textMargin + fs, text: o.text, anchor: 'middle', size: fs });
-	return { width: x + m, height: m + Math.max(guardH, h + textH) + m, rects, shapes, texts, o };
+	// Widen the symbol when text is wider than the bars (estimate: monospace ~0.6em per character)
+	let left = m, right = x;
+	for (const t of texts) { const half = (String(t.text).length * t.size * 0.6) / 2; left = Math.min(left, t.x - half); right = Math.max(right, t.x + half); }
+	const shift = Math.ceil(m - left);
+	if (shift > 0) { for (const r of rects) r[0] += shift; for (const t of texts) t.x += shift; }
+	return { width: Math.ceil(Math.max(x, right) + Math.max(shift, 0) + m), height: m + Math.max(guardH, h + textH) + m, rects, shapes, texts, o };
 }
 
 const esc = (v) => String(v).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
@@ -96,7 +113,8 @@ export function toSVG(symbol, options) {
 	const d = L.rects.map(([x, y, w, h]) => `M${x} ${y}h${w}v${h}h${-w}z`).join('');
 	const byColor = {};
 	for (const sh of L.shapes) (byColor[sh.color ?? o.color] ??= []).push(rrPath(sh) + (sh.hole ? rrPath(sh.hole) : ''));
-	return `<svg xmlns="http://www.w3.org/2000/svg" width="${L.width}" height="${L.height}" viewBox="0 0 ${L.width} ${L.height}"${L.shapes.length ? '' : ' shape-rendering="crispEdges"'}>` +
+	const title = o.title === false ? '' : `<title>${esc(o.title ?? symbol.text ?? '')}</title>`;
+	return `<svg xmlns="http://www.w3.org/2000/svg" width="${L.width}" height="${L.height}" viewBox="0 0 ${L.width} ${L.height}" role="img"${L.shapes.length ? '' : ' shape-rendering="crispEdges"'}>` + title +
 		(o.background ? `<rect width="100%" height="100%" fill="${esc(o.background)}"/>` : '') +
 		(d ? `<path fill="${esc(o.color)}" d="${d}"/>` : '') +
 		Object.entries(byColor).map(([c, ds]) => `<path fill="${esc(c)}" fill-rule="evenodd" d="${ds.join('')}"/>`).join('') +

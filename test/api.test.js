@@ -6,7 +6,8 @@ import { encode, isValid, toSVG, toPNG, toDataURL, toBitmap, formats, detectForm
 
 test('SVG output is escaped and sized', () => {
 	const svg = toSVG('<a&"b>', { format: 'CODE128', font: 'x"y' });
-	assert.match(svg, /^<svg [^>]*width="\d+" height="\d+"/);
+	assert.match(svg, /^<svg [^>]*width="\d+" height="\d+"[^>]*role="img"[^>]*><title>&#60;a&#38;&#34;b&#62;<\/title>/);
+	assert.ok(!toSVG('x', { title: false }).includes('<title>') && toSVG('x', { title: 'Order 7' }).includes('<title>Order 7</title>'));
 	assert.ok(svg.includes('&#60;a&#38;&#34;b&#62;') && svg.includes('x&#34;y') && !svg.includes('<a&'));
 	assert.ok(!toSVG('123', { text: false }).includes('<text'));
 	assert.ok(toSVG('hi', { format: 'QR', background: null }).includes('<path') && !toSVG('hi', { format: 'QR', background: null }).includes('<rect'));
@@ -94,4 +95,48 @@ test('Data Matrix shapes and Micro QR versions', () => {
 	assert.ok(r.width > r.height);
 	assert.deepEqual(['1', 'AB12', 'hello', 'HELLO WORLD 12345'].map((v) => encode(v, { format: 'MICROQR' }).version), ['M1', 'M2', 'M3', 'M4']);
 	assert.throws(() => encode('x'.repeat(40), { format: 'MICROQR' }), /too long/);
+});
+
+test('CommonJS build', async () => {
+	const { createRequire } = await import('node:module');
+	const cjs = createRequire(import.meta.url)('../dist/index.cjs');
+	assert.equal(cjs.toSVG('hi', { format: 'QR' }), toSVG('hi', { format: 'QR' }));
+});
+
+test('<bar-code> element', async () => {
+	const events = [];
+	globalThis.HTMLElement = class {
+		attrs = {}; isConnected = true; innerHTML = '';
+		getAttribute(k) { return this.attrs[k] ?? null; } hasAttribute(k) { return k in this.attrs; }
+		setAttribute(k, v) { this.attrs[k] = String(v); } removeAttribute(k) { delete this.attrs[k]; }
+		dispatchEvent(e) { events.push(e); }
+	};
+	globalThis.CustomEvent ??= class extends Event { constructor(t, o) { super(t); this.detail = o?.detail; } }; // Node 18
+	const defined = {};
+	globalThis.customElements = { get: (n) => defined[n], define: (n, c) => (defined[n] = c) };
+	const { BarCodeElement } = await import('../src/element.js?test');
+	assert.equal(defined['bar-code'], BarCodeElement);
+	const el = new BarCodeElement();
+	Object.assign(el.attrs, { value: '5901234123457', format: 'EAN13', scale: '3', text: 'false' });
+	el.connectedCallback();
+	assert.equal(el.innerHTML, toSVG('5901234123457', { format: 'EAN13', scale: 3, text: false }));
+	el.attrs.value = '123';
+	el.attributeChangedCallback();
+	assert.equal(el.innerHTML, '');
+	assert.equal(el.attrs['aria-invalid'], 'true');
+	assert.equal(events.length, 1);
+	delete globalThis.HTMLElement; delete globalThis.customElements;
+});
+
+test('CLI --decode reads PNGs (ours and bwip-js RGBA)', async () => {
+	const { mkdtempSync, writeFileSync } = await import('node:fs');
+	const dir = mkdtempSync((await import('node:os')).tmpdir() + '/bjs-');
+	const bwip = (await import('node:module')).createRequire(import.meta.url)('bwip-js');
+	writeFileSync(dir + '/a.png', toPNG('decode me', { format: 'QR', finderColor: '#1a3c8f' }));
+	writeFileSync(dir + '/b.png', await bwip.toBuffer({ bcid: 'ean13', text: '5901234123457', scale: 3, includetext: true }));
+	const run = (f) => spawnSync(process.execPath, ['bin/barcodejs.js', '--decode', f], { encoding: 'utf8' });
+	assert.equal(run(dir + '/a.png').stdout.trim(), 'decode me');
+	assert.equal(run(dir + '/b.png').stdout.trim(), '5901234123457');
+	writeFileSync(dir + '/c.png', toPNG('x', { format: 'QR', text: false, background: '#ffffff', color: '#ffffff' }));
+	assert.equal(run(dir + '/c.png').status, 1);
 });

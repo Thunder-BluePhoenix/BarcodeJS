@@ -5,7 +5,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        node: [18, 20, 22]
+        node: [18, 22, 24]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -14,7 +14,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
-      - run: npm run build
+      - run: npm run size
 
   # Second, independent decoder: zxing-cpp reads Micro QR, Aztec, PDF417, 144x144 Data Matrix,
   # UTF-8 (ECI) and other cases zxing-js cannot.
@@ -31,4 +31,8 @@ jobs:
           python-version: '3.12'
       - run: pip install -r test/zxing-cpp/requirements.txt
       - run: npm ci
+      # Fixed cases + 60 seeded random values per format; the seed changes every run (printed for reproduction)
       - run: npm run test:zxing-cpp
+        env:
+          FUZZ: 60
+          SEED: ${{ github.run_number }}

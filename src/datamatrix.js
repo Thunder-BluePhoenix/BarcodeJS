@@ -1,7 +1,8 @@
 // Data Matrix ECC 200 (ISO/IEC 16022): square 10x10-144x144 and rectangular 8x18-16x48,
-// ASCII / C40 / Text / Base256 encodation, GS1 (FNC1), UTF-8 via ECI.
+// optimal ASCII / C40 / Text / X12 / EDIFACT / Base256 encodation, GS1 (FNC1), Latin-1 / UTF-8 via ECI.
 import { rsEncode } from './rs.js';
 import { gs1Parts } from './gs1.js';
+import { charsetBytes } from './charset.js';
 
 // [rows, cols, data codewords, ecc codewords, region rows, region cols, interleaved blocks]
 const SQUARE = [
@@ -13,8 +14,14 @@ const SQUARE = [
 ].map(([n, d, e, r, b]) => [n, n, d, e, r, r, b]);
 const RECT = [[8, 18, 5, 7, 6, 16, 1], [8, 32, 10, 11, 6, 14, 1], [12, 26, 16, 14, 10, 24, 1],
 	[12, 36, 22, 18, 10, 16, 1], [16, 36, 32, 24, 14, 16, 1], [16, 48, 49, 28, 14, 22, 1]];
+// DMRE rectangular extensions (ISO/IEC 21471)
+const DMRE = [[8, 48, 18, 15, 6, 22, 1], [8, 64, 24, 18, 6, 14, 1], [8, 80, 32, 22, 6, 18, 1], [8, 96, 38, 28, 6, 22, 1],
+	[8, 120, 49, 32, 6, 18, 1], [8, 144, 63, 36, 6, 22, 1], [12, 64, 43, 27, 10, 14, 1], [12, 88, 64, 36, 10, 20, 1],
+	[16, 64, 62, 36, 14, 14, 1], [20, 36, 44, 28, 18, 16, 1], [20, 44, 56, 34, 18, 20, 1], [20, 64, 84, 42, 18, 14, 1],
+	[22, 48, 72, 38, 20, 22, 1], [24, 48, 80, 41, 22, 22, 1], [24, 64, 108, 46, 22, 14, 1], [26, 40, 70, 38, 24, 18, 1],
+	[26, 48, 90, 42, 24, 22, 1], [26, 64, 118, 50, 24, 14, 1]];
 
-const FNC1 = 232, LATCH_C40 = 230, LATCH_TEXT = 239, LATCH_B256 = 231, UNLATCH = 254;
+const FNC1 = 232, LATCH_C40 = 230, LATCH_TEXT = 239, LATCH_X12 = 238, LATCH_EDIFACT = 240, LATCH_B256 = 231, UNLATCH = 254;
 
 function ascii(bytes) {
 	const cw = [];
@@ -43,40 +50,90 @@ function c40Values(b, text) {
 	return [2, b - 96]; // C40: ` a-z { | } ~ DEL; Text: ` { | } ~ DEL
 }
 
-// C40/Text for the longest prefix that packs into whole triplets, then ASCII for the rest
-function c40(bytes, text) {
-	const vals = [];
-	let best = 0, bestVals = 0;
-	bytes.forEach((b, i) => {
-		vals.push(...c40Values(b, text));
-		if (vals.length % 3 === 0) { best = i + 1; bestVals = vals.length; }
-	});
-	if (!best) return null;
-	vals.length = bestVals;
-	const cw = [text ? LATCH_TEXT : LATCH_C40];
+// X12: CR * > space 0-9 A-Z, three per two codewords like C40 but without shifts
+const x12Value = (b) => (b === 13 ? 0 : b === 42 ? 1 : b === 62 ? 2 : b === 32 ? 3 : b >= 48 && b <= 57 ? b - 44 : b >= 65 && b <= 90 ? b - 51 : -1);
+
+// EDIFACT: ASCII 32-94 as 6-bit values, four per three codewords, ended by the 6-bit unlatch value 31
+function edifact(bytes) {
+	const bits = [];
+	for (const v of [...bytes.map((b) => b & 63), 31]) for (let i = 5; i >= 0; i--) bits.push((v >> i) & 1);
+	while (bits.length % 8) bits.push(0);
+	const cw = [LATCH_EDIFACT];
+	for (let i = 0; i < bits.length; i += 8) cw.push(bits.slice(i, i + 8).reduce((a, b) => (a << 1) | b, 0));
+	return cw;
+}
+
+const packC40 = (vals, latch) => {
+	const cw = [latch];
 	for (let i = 0; i < vals.length; i += 3) {
 		const v = 1600 * vals[i] + 40 * vals[i + 1] + vals[i + 2] + 1;
 		cw.push(v >> 8, v & 255);
 	}
-	cw.push(UNLATCH);
-	return cw.concat(ascii(bytes.slice(best)));
-}
+	return cw.concat(UNLATCH);
+};
 
+// Base256 segment starting at codeword position `offset` (0-based count of codewords before the latch)
 function base256(bytes, offset) {
 	const n = bytes.length;
-	if (n > 1555) return null;
 	const body = [...(n <= 249 ? [n] : [Math.floor(n / 250) + 249, n % 250]), ...bytes];
 	return [LATCH_B256, ...body.map((b, i) => { const t = b + ((149 * (offset + 2 + i)) % 255) + 1; return t <= 255 ? t : t - 256; })];
 }
 
-// Shortest of the single-mode candidates. ponytail: no per-segment mode switching (ISO Annex P look-ahead).
+// Minimal codewords by dynamic programming over character positions. Each step is one ASCII
+// character (or digit pair), or a whole C40 / Text / X12 / EDIFACT / Base256 segment that returns to ASCII.
+// ponytail: no end-of-data shortcuts that depend on the final symbol size (e.g. implicit unlatch with one
+// codeword left); vs ZXing's minimal encoder this is equal or smaller ~98% of the time, else one size larger.
+function optimal(bytes, offset) {
+	const n = bytes.length;
+	const cost = new Array(n + 1).fill(Infinity), how = new Array(n + 1);
+	cost[0] = 0;
+	const isDigit = (b) => b >= 48 && b <= 57;
+	for (let i = 0; i < n; i++) {
+		if (cost[i] === Infinity) continue;
+		const relax = (j, c, h) => { if (cost[i] + c < cost[j]) { cost[j] = cost[i] + c; how[j] = h; } };
+		const b = bytes[i];
+		if (isDigit(b) && isDigit(bytes[i + 1])) relax(i + 2, 1, { from: i, mode: 'ascii' });
+		relax(i + 1, b > 127 ? 2 : 1, { from: i, mode: 'ascii' });
+		for (const text of [false, true]) {
+			let vals = 0;
+			for (let j = i; j < n; j++) {
+				vals += c40Values(bytes[j], text).length;
+				if (vals % 3 === 0) relax(j + 1, 2 + (2 * vals) / 3, { from: i, mode: text ? 'text' : 'c40' });
+				// end of data: two leftover values are completed with a Shift 1 filler
+				else if (j === n - 1 && vals % 3 === 2) relax(n, 2 + (2 * (vals + 1)) / 3, { from: i, mode: text ? 'text' : 'c40', fill: true });
+			}
+		}
+		for (let j = i; j < n && x12Value(bytes[j]) >= 0; j++)
+			if ((j - i + 1) % 3 === 0) relax(j + 1, 2 + (2 * (j - i + 1)) / 3, { from: i, mode: 'x12' });
+		for (let j = i; j < n && bytes[j] >= 32 && bytes[j] <= 94; j++) relax(j + 1, 1 + Math.ceil((6 * (j - i + 2)) / 8), { from: i, mode: 'edifact' });
+		for (let j = i + 1; j <= Math.min(n, i + 1555); j++) relax(j, 1 + (j - i <= 249 ? 1 : 2) + (j - i), { from: i, mode: 'b256' });
+	}
+	const steps = [];
+	for (let j = n; j > 0; j = how[j].from) steps.unshift({ ...how[j], to: j });
+	const cw = [];
+	cw.slack = 0;
+	for (const { from, to, mode, fill } of steps) {
+		const seg = bytes.slice(from, to);
+		if (mode === 'ascii') cw.push(...ascii(seg));
+		else if (mode === 'b256') cw.push(...base256(seg, offset + cw.length));
+		else if (mode === 'edifact') {
+			const e = edifact(seg);
+			cw.push(...e);
+			// Readers decode EDIFACT in 3-codeword groups; a final partial group needs that much symbol space
+			cw.slack = to === n ? (3 - ((e.length - 1) % 3)) % 3 : 0;
+		}
+		else if (mode === 'x12') cw.push(...packC40(seg.map(x12Value), LATCH_X12));
+		else cw.push(...packC40([...seg.flatMap((b) => c40Values(b, mode === 'text')), ...(fill ? [0] : [])], mode === 'text' ? LATCH_TEXT : LATCH_C40));
+	}
+	return cw;
+}
+
 function encodeData(text, gs1) {
 	if (gs1) return [FNC1, ...ascii(gs1Parts(text, 'GS1 DataMatrix').flatMap((p) => (p === null ? [null] : [...p].map((c) => c.charCodeAt(0)))))];
-	const latin1 = [...text].every((c) => c.codePointAt(0) < 256);
-	const bytes = latin1 ? [...text].map((c) => c.charCodeAt(0)) : [...new TextEncoder().encode(text)];
-	const eci = latin1 ? [] : [241, 27]; // ECI 000026 = UTF-8
-	const cands = [ascii(bytes), c40(bytes, false), c40(bytes, true), base256(bytes, eci.length)].filter(Boolean);
-	return eci.concat(cands.reduce((a, b) => (b.length < a.length ? b : a)));
+	const { bytes, eci: e } = charsetBytes(text);
+	const eci = e ? [241, e + 1] : [];
+	const cw = optimal(bytes, eci.length);
+	return Object.assign(eci.concat(cw), { slack: cw.slack });
 }
 
 // Module placement from ISO/IEC 16022 Annex F. Returns 10*codeword+bit (bit 1 = MSB), or 1 for a fixed dark module.
@@ -85,6 +142,7 @@ function placement(nrow, ncol) {
 	const module = (row, col, chr, bit) => {
 		if (row < 0) { row += nrow; col += 4 - ((nrow + 4) % 8); }
 		if (col < 0) { col += ncol; row += 4 - ((ncol + 4) % 8); }
+		if (row >= nrow) row -= nrow; // needed by some DMRE sizes (ISO/IEC 21471)
 		arr[row * ncol + col] = 10 * chr + bit;
 	};
 	const utah = (r, c, ch) => {
@@ -117,14 +175,18 @@ function placement(nrow, ncol) {
 	return arr;
 }
 
-export function datamatrix(value, { shape = 'square', gs1 = false } = {}) {
+export function datamatrix(value, { shape = 'square', gs1 = false, dmre = false, size } = {}) {
 	const text = String(value);
 	const data = encodeData(text, gs1);
-	const sizes = shape === 'rectangle' ? RECT : shape === 'auto' ? [...SQUARE, ...RECT].sort((a, b) => a[0] * a[1] - b[0] * b[1]) : SQUARE;
+	const rect = dmre ? [...RECT, ...DMRE].sort((a, b) => a[2] - b[2]) : RECT;
+	const sizes = shape === 'rectangle' ? rect : shape === 'auto' ? [...SQUARE, ...rect].sort((a, b) => a[0] * a[1] - b[0] * b[1]) : SQUARE;
 	// A trailing C40/Text unlatch may be dropped when the data exactly fills the symbol
-	const fits = (s) => s[2] >= data.length || (data[data.length - 1] === UNLATCH && s[2] === data.length - 1);
-	const spec = sizes.find(fits);
-	if (!spec) throw new Error('Data Matrix data too long');
+	const fits = (s) => s[2] >= data.length + (data.slack || 0) || (data[data.length - 1] === UNLATCH && s[2] === data.length - 1);
+	// size: force a symbol, e.g. '24x24' or '8x80' (rows x columns)
+	const all = [...SQUARE, ...RECT, ...DMRE];
+	const spec = size ? all.find(([r, c]) => `${r}x${c}` === size) : sizes.find(fits);
+	if (size && !spec) throw new Error(`Unknown Data Matrix size: ${size}`);
+	if (!spec || !fits(spec)) throw new Error(size ? `Data Matrix data does not fit in ${size}` : 'Data Matrix data too long');
 	const [h, w, nData, nEcc, rh, rw, nBlocks] = spec;
 	if (nData < data.length) data.pop();
 
