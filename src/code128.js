@@ -1,5 +1,6 @@
 // Code 128 with optimal (shortest) code set selection, Latin-1 via FNC4, and GS1-128.
 import { fail } from './linear.js';
+import { gs1Parts } from './gs1.js';
 
 const BARS = [
 	212222, 222122, 222221, 121223, 121322, 131222, 122213, 122312, 132212, 221213, 221312, 231212, 112232, 122132,
@@ -69,21 +70,9 @@ export function code128(value) {
 	return { type: 'linear', segments: [{ bits: encodeTokens(tokens), text: v.replace(/[\x00-\x1f\x7f]/g, '') }], text: v };
 }
 
-// Application Identifiers whose total length (AI + data) is predefined: no FNC1 separator needed after them.
-const PREDEFINED = { '00': 20, '01': 16, '02': 16, '03': 16, '04': 18, '11': 8, '12': 8, '13': 8, '14': 8, '15': 8,
-	'16': 8, '17': 8, '18': 8, '19': 8, '20': 4, '31': 10, '32': 10, '33': 10, '34': 10, '35': 10, '36': 10, '41': 16 };
-
 // Input in human-readable form: "(01)09501101530003(17)250101(10)ABC123"
 export function gs1128(value) {
-	const v = String(value);
-	const fields = [...v.matchAll(/\((\d{2,4})\)([^()]+)/g)];
-	if (!/^[\x20-\x7e]+$/.test(v) || fields.map((m) => m[0]).join('') !== v) fail('GS1-128', value);
 	const tokens = [FNC1];
-	fields.forEach(([, ai, data], k) => {
-		const fixed = PREDEFINED[ai.slice(0, 2)];
-		if (fixed && ai.length + data.length !== fixed) fail('GS1-128', value);
-		tokens.push(...[...(ai + data)].map((c) => c.charCodeAt(0)));
-		if (!fixed && k < fields.length - 1) tokens.push(FNC1);
-	});
-	return { type: 'linear', segments: [{ bits: encodeTokens(tokens), text: v }], text: v };
+	for (const p of gs1Parts(value, 'GS1-128')) tokens.push(...(p === null ? [FNC1] : [...p].map((c) => c.charCodeAt(0))));
+	return { type: 'linear', segments: [{ bits: encodeTokens(tokens), text: String(value) }], text: String(value) };
 }

@@ -17,12 +17,66 @@ const NUM_BLOCKS = [
 const ECL = { L: 0, M: 1, Q: 2, H: 3 };
 const FORMAT_BITS = [1, 0, 3, 2];
 const ALNUM = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:';
+export const SEP = null; // GS1 FNC1 separator in a character list
 
-// mode indicator + character count bit lengths for versions 1-9, 10-26, 27-40
-const MODES = {
-	numeric: { bits: 1, count: [10, 12, 14] },
-	alphanumeric: { bits: 2, count: [9, 11, 13] },
-	byte: { bits: 4, count: [8, 16, 16] },
+// Encoding modes. cost() is in 1/6 bit so numeric (10 bits / 3 chars) stays integral.
+const utf8 = (c) => (c === SEP ? [0x1d] : [...new TextEncoder().encode(c)]);
+export const MODES = {
+	numeric: { id: 0, can: (c) => c !== SEP && c >= '0' && c <= '9', cost: () => 20,
+		count: (cs) => cs.length,
+		put(cs, push) { const s = cs.join(''); for (let i = 0; i < s.length; i += 3) push(+s.slice(i, i + 3), Math.min(3, s.length - i) * 3 + 1); } },
+	alphanumeric: { id: 1, can: (c) => c === SEP || ALNUM.includes(c), cost: (c, gs1) => (gs1 && c === '%' ? 66 : 33),
+		expand: (cs, gs1) => cs.flatMap((c) => (c === SEP ? ['%'] : gs1 && c === '%' ? ['%', '%'] : [c])),
+		count(cs, gs1) { return this.expand(cs, gs1).length; },
+		put(cs, push, gs1) {
+			const s = this.expand(cs, gs1);
+			for (let i = 0; i + 1 < s.length; i += 2) push(ALNUM.indexOf(s[i]) * 45 + ALNUM.indexOf(s[i + 1]), 11);
+			if (s.length % 2) push(ALNUM.indexOf(s[s.length - 1]), 6);
+		} },
+	byte: { id: 2, can: () => true, cost: (c) => utf8(c).length * 48,
+		count: (cs) => cs.reduce((n, c) => n + utf8(c).length, 0),
+		put(cs, push) { for (const c of cs) for (const b of utf8(c)) push(b, 8); } },
+};
+const MODE_LIST = [MODES.numeric, MODES.alphanumeric, MODES.byte];
+
+// Optimal split of `chars` into mode segments (dynamic programming over per-character mode states).
+// headBits(mode) = mode indicator + character count bits. Returns [{ mode, chars }].
+export function segmentize(chars, modes, headBits, gs1) {
+	const head = modes.map((m) => headBits(m) * 6);
+	let prev = head.slice();
+	const from = [];
+	for (const c of chars) {
+		const cur = modes.map((m, j) => (m.can(c) ? prev[j] + m.cost(c, gs1) : Infinity));
+		const how = modes.map((m, j) => (cur[j] < Infinity ? j : -1));
+		const ended = cur.slice();
+		for (let j = 0; j < modes.length; j++)
+			for (let k = 0; k < modes.length; k++) {
+				const v = Math.ceil(ended[k] / 6) * 6 + head[j];
+				if (how[k] >= 0 && v < cur[j]) { cur[j] = v; how[j] = k; }
+			}
+		from.push(how);
+		prev = cur;
+	}
+	let state = prev.indexOf(Math.min(...prev));
+	const modeOf = [];
+	for (let i = chars.length - 1; i >= 0; i--) modeOf[i] = state = from[i][state];
+	const segs = [];
+	chars.forEach((c, i) => {
+		const m = modes[modeOf[i]];
+		if (segs.length && segs[segs.length - 1].mode === m) segs[segs.length - 1].chars.push(c);
+		else segs.push({ mode: m, chars: [c] });
+	});
+	return segs;
+}
+
+export const bitWriter = () => {
+	const bits = [];
+	return { bits, push(val, n) { for (let i = n - 1; i >= 0; i--) bits.push((val >>> i) & 1); } };
+};
+const toBytes = (bits) => {
+	const out = [];
+	for (let i = 0; i < bits.length; i += 8) out.push(bits.slice(i, i + 8).reduce((a, b) => (a << 1) | b, 0) << Math.max(0, i + 8 - bits.length));
+	return out;
 };
 
 const rawModules = (ver) => {
@@ -46,52 +100,47 @@ function alignPositions(ver, size) {
 	return res;
 }
 
-// ponytail: one mode for the whole string; mixed-mode segmentation saves ~10-20% on mixed input.
-function segment(text) {
-	if (/^\d*$/.test(text)) return { mode: 'numeric', count: text.length, put(push) {
-		for (let i = 0; i < text.length; i += 3) {
-			const chunk = text.slice(i, i + 3);
-			push(+chunk, chunk.length * 3 + 1);
-		}
-	} };
-	if ([...text].every((c) => ALNUM.includes(c))) return { mode: 'alphanumeric', count: text.length, put(push) {
-		for (let i = 0; i + 1 < text.length; i += 2) push(ALNUM.indexOf(text[i]) * 45 + ALNUM.indexOf(text[i + 1]), 11);
-		if (text.length % 2) push(ALNUM.indexOf(text[text.length - 1]), 6);
-	} };
-	const bytes = new TextEncoder().encode(text);
-	return { mode: 'byte', count: bytes.length, put(push) { for (const b of bytes) push(b, 8); } };
-}
+// Character count bits for QR versions 1-9, 10-26, 27-40
+const CC_BITS = [[10, 12, 14], [9, 11, 13], [8, 16, 16]];
 
-export function qr(value, { ecLevel = 'M', version } = {}) {
+export function qr(value, { ecLevel = 'M', version, gs1 = false, chars } = {}) {
 	const text = String(value);
 	const ecl = ECL[String(ecLevel).toUpperCase()];
 	if (ecl === undefined) throw new Error(`Invalid QR ecLevel: ${ecLevel}`);
-	const seg = segment(text);
-	const mode = MODES[seg.mode];
+	chars ??= [...text];
+	if (!chars.length) throw new Error('QR value is empty');
 
-	// Pick the smallest version that fits
-	let ver = version || 1, bitLen;
-	for (; ; ver++) {
+	// Pick the smallest version that fits (segmentation depends on the count-field sizes)
+	let ver, segs, cache = [];
+	for (ver = version || 1; ; ver++) {
 		if (ver > 40) throw new Error('QR data too long');
-		const cc = mode.count[ver < 10 ? 0 : ver < 27 ? 1 : 2];
-		bitLen = 4 + cc;
-		seg.put((_, n) => (bitLen += n));
-		if (seg.count < 2 ** cc && bitLen <= dataCodewords(ver, ecl) * 8) break;
+		const g = ver < 10 ? 0 : ver < 27 ? 1 : 2;
+		segs = cache[g] ??= segmentize(chars, MODE_LIST, (m) => 4 + CC_BITS[m.id][g], gs1);
+		let len = gs1 ? 4 : 0, ok = true;
+		for (const s of segs) {
+			const n = s.mode.count(s.chars, gs1), cc = CC_BITS[s.mode.id][g];
+			if (n >= 2 ** cc) ok = false;
+			len += 4 + cc;
+			s.mode.put(s.chars, (_, b) => (len += b), gs1);
+		}
+		if (ok && len <= dataCodewords(ver, ecl) * 8) break;
 		if (version) throw new Error(`QR data does not fit in version ${version}`);
 	}
 
 	// Data bits
-	const bits = [];
-	const push = (val, n) => { for (let i = n - 1; i >= 0; i--) bits.push((val >>> i) & 1); };
-	push(mode.bits, 4);
-	push(seg.count, mode.count[ver < 10 ? 0 : ver < 27 ? 1 : 2]);
-	seg.put(push);
+	const { bits, push } = bitWriter();
+	const g = ver < 10 ? 0 : ver < 27 ? 1 : 2;
+	if (gs1) push(5, 4); // FNC1 in first position
+	for (const s of segs) {
+		push([1, 2, 4][s.mode.id], 4);
+		push(s.mode.count(s.chars, gs1), CC_BITS[s.mode.id][g]);
+		s.mode.put(s.chars, push, gs1);
+	}
 	const cap = dataCodewords(ver, ecl) * 8;
 	push(0, Math.min(4, cap - bits.length));
 	push(0, (8 - (bits.length % 8)) % 8);
 	for (let pad = 0xec; bits.length < cap; pad ^= 0xec ^ 0x11) push(pad, 8);
-	const data = [];
-	for (let i = 0; i < bits.length; i += 8) data.push(bits.slice(i, i + 8).reduce((a, b) => (a << 1) | b, 0));
+	const data = toBytes(bits);
 
 	// Split into blocks, add ECC, interleave
 	const numBlocks = NUM_BLOCKS[ecl][ver], blockEcc = ECC_PER_BLOCK[ecl][ver];
