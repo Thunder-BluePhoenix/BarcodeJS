@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BarcodeJS demo</title>
+<style>
+	body { font: 15px/1.5 system-ui, sans-serif; max-width: 760px; margin: 2rem auto; padding: 0 16px; color: #1b1b1b; background: #fff; }
+	form { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 1.5rem; } #value { flex: 1 1 240px; min-width: 0; }
+	input, select, button { font: inherit; padding: 6px 10px; }
+	#out { min-height: 160px; display: flex; align-items: center; justify-content: center; border: 1px solid #ddd; border-radius: 8px; padding: 16px; overflow-x: auto; }
+	#err { color: #b00020; min-height: 1.5em; }
+	.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; margin-top: 2rem; }
+	.grid figure { margin: 0; text-align: center; } .grid svg { max-width: 100%; height: auto; }
+</style>
+</head>
+<body>
+<h1>BarcodeJS</h1>
+<p>Run <code>npm run build</code> first; this page loads <code>../dist/barcode.min.js</code>.</p>
+<form id="f">
+	<input id="value" value="https://github.com/Thunder-BluePhoenix/BarcodeJS" aria-label="Value">
+	<select id="format" aria-label="Format"></select>
+	<button type="button" id="png">Download PNG</button>
+</form>
+<div id="out"></div>
+<p id="err" role="alert"></p>
+<div class="grid" id="grid"></div>
+
+<script src="../dist/barcode.min.js"></script>
+<script>
+	const { toSVG, toDataURL, isValid } = BarcodeJS;
+	const samples = {
+		QR: 'https://example.com', DATAMATRIX: 'BarcodeJS 2026', CODE128: 'Hello World', 'GS1-128': '(01)09501101530003(17)250101(10)ABC123',
+		EAN13: '5901234123457', UPC: '036000291452', UPCE: '01234565', ISBN: '978-0-306-40615-7', ISSN: '0317-8471',
+		CODE39: 'CODE-39', CODE93: 'CODE93', CODE11: '123-45', ITF14: '1234567890123', CODABAR: 'A40156B', MSI10: '1234567', PHARMACODE: '1234',
+	};
+	const $ = (id) => document.getElementById(id);
+	for (const f of Object.keys(samples)) $('format').add(new Option(f, f));
+	const draw = () => {
+		try { $('out').innerHTML = toSVG($('value').value, { format: $('format').value }); $('err').textContent = ''; }
+		catch (e) { $('err').textContent = e.message; }
+	};
+	$('value').oninput = draw;
+	$('format').onchange = () => { $('value').value = samples[$('format').value]; draw(); };
+	$('png').onclick = () => Object.assign(document.createElement('a'), { href: toDataURL($('value').value, { format: $('format').value }), download: 'barcode.png' }).click();
+	for (const [format, v] of Object.entries(samples))
+		$('grid').insertAdjacentHTML('beforeend', `<figure>${toSVG(v, { format, ...(format === 'EAN13' ? { addon: '12' } : {}) })}<figcaption>${format}</figcaption></figure>`);
+	draw();
+</script>
+</body>
+</html>

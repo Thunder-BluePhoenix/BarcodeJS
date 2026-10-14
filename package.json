@@ -1,0 +1,58 @@
+{
+  "name": "barcodejs",
+  "version": "1.0.0",
+  "description": "Zero-dependency barcode generator: QR, Data Matrix, Code 128, GS1-128, EAN/UPC, ISBN and more. SVG, PNG and canvas output in Node and browsers.",
+  "type": "module",
+  "main": "./src/index.js",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./src/index.js"
+    },
+    "./render": "./src/render.js",
+    "./linear": "./src/linear.js",
+    "./code128": "./src/code128.js",
+    "./qr": "./src/qr.js",
+    "./datamatrix": "./src/datamatrix.js"
+  },
+  "unpkg": "./dist/barcode.min.js",
+  "jsdelivr": "./dist/barcode.min.js",
+  "files": [
+    "src/*.js",
+    "dist/*.js",
+    "index.d.ts"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test",
+    "build": "esbuild src/index.js --bundle --minify --format=iife --global-name=BarcodeJS --outfile=dist/barcode.min.js && esbuild src/index.js --bundle --minify --format=esm --outfile=dist/barcode.esm.min.js",
+    "prepublishOnly": "npm test && npm run build"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Thunder-BluePhoenix/BarcodeJS.git"
+  },
+  "keywords": [
+    "barcode",
+    "qr",
+    "qrcode",
+    "datamatrix",
+    "code128",
+    "gs1-128",
+    "ean",
+    "upc",
+    "isbn",
+    "svg",
+    "png",
+    "canvas"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@zxing/library": "^0.21.3",
+    "esbuild": "^0.25.0"
+  }
+}
